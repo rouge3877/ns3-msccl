@@ -144,6 +144,9 @@ class RdmaRxQueuePair : public Object { // Rx side queue pair
   uint32_t m_lastNACK;
   EventId QcnTimerEvent; // if destroy this rxQp, remember to cancel this timer
 
+  // current receiving message, used to detect if a message is fully received
+  uint64_t m_curMessageSize;
+
   static TypeId GetTypeId(void);
   RdmaRxQueuePair();
   uint32_t GetHash(void);
