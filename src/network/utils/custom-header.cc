@@ -160,6 +160,7 @@ void CustomHeader::Serialize (Buffer::Iterator start) const{
 		  i.WriteHtonU16 (0);
 		  // SeqTsHeader
 		  i.WriteHtonU64 (udp.seq);
+		  i.WriteHtonU64 (udp.message_size);
 		  i.WriteHtonU16 (udp.pg);
 		  udp.ih.Serialize(i);
 	  }else if (l3Prot == 0xFF){ // CNP
@@ -292,6 +293,7 @@ CustomHeader::Deserialize (Buffer::Iterator start)
 
 		  // SeqTsHeader
 		  udp.seq = i.ReadNtohU64 ();
+		  udp.message_size = i.ReadNtohU64 ();
 		  udp.pg =  i.ReadNtohU16 ();
 		  if (getInt)
 			  udp.ih.Deserialize(i);
@@ -333,7 +335,7 @@ uint32_t CustomHeader::GetAckSerializedSize(void){
 }
 
 uint32_t CustomHeader::GetUdpHeaderSize(void){
-	return 8 + sizeof(udp.pg) + sizeof(udp.seq) + IntHeader::GetStaticSize();
+	return 8 + sizeof(udp.pg) + sizeof(udp.seq) + sizeof(udp.message_size) + IntHeader::GetStaticSize();
 }
 
 uint32_t CustomHeader::GetStaticWholeHeaderSize(void){

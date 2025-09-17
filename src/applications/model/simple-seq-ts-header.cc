@@ -31,7 +31,7 @@ namespace ns3 {
 NS_OBJECT_ENSURE_REGISTERED (SimpleSeqTsHeader);
 
 SimpleSeqTsHeader::SimpleSeqTsHeader ()
-  : m_seq (0)
+  : m_seq (0), m_message_size (0)
 {
 	if (IntHeader::mode == 1)
 		ih.ts = Simulator::Now().GetTimeStep();
@@ -46,6 +46,17 @@ uint64_t
 SimpleSeqTsHeader::GetSeq (void) const
 {
   return m_seq;
+}
+
+void
+SimpleSeqTsHeader::SetMessageSize (uint64_t size)
+{
+  m_message_size = size;
+}
+uint64_t
+SimpleSeqTsHeader::GetMessageSize (void) const
+{
+  return m_message_size;
 }
 
 void
@@ -85,7 +96,7 @@ SimpleSeqTsHeader::Print (std::ostream &os) const
 {
   //os << "(seq=" << m_seq << " time=" << TimeStep (m_ts).GetSeconds () << ")";
 	//os << m_seq << " " << TimeStep (m_ts).GetSeconds () << " " << m_pg;
-	os << m_seq << " " << m_pg;
+	os << m_seq << " " << m_message_size << " " << m_pg;
 }
 uint32_t
 SimpleSeqTsHeader::GetSerializedSize (void) const
@@ -93,7 +104,7 @@ SimpleSeqTsHeader::GetSerializedSize (void) const
 	return GetHeaderSize();
 }
 uint32_t SimpleSeqTsHeader::GetHeaderSize(void){
-	return sizeof(m_seq) + sizeof(m_pg) + IntHeader::GetStaticSize();
+	return sizeof(m_seq) + sizeof(m_message_size) + sizeof(m_pg) + IntHeader::GetStaticSize();
 }
 
 void
@@ -101,6 +112,7 @@ SimpleSeqTsHeader::Serialize (Buffer::Iterator start) const
 {
   Buffer::Iterator i = start;
   i.WriteHtonU64 (m_seq);
+  i.WriteHtonU64 (m_message_size);
   i.WriteHtonU16 (m_pg);
 
   // write IntHeader
@@ -111,6 +123,7 @@ SimpleSeqTsHeader::Deserialize (Buffer::Iterator start)
 {
   Buffer::Iterator i = start;
   m_seq = i.ReadNtohU64 ();
+  m_message_size = i.ReadNtohU64 ();
   m_pg =  i.ReadNtohU16 ();
 
   // read IntHeader

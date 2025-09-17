@@ -46,6 +46,10 @@ public:
    * \return the sequence number
    */
   uint64_t GetSeq (void) const;
+
+  void SetMessageSize (uint64_t size);
+  uint64_t GetMessageSize (void) const;
+
   /**
    * \return the time stamp
    */
@@ -64,6 +68,7 @@ private:
   virtual uint32_t Deserialize (Buffer::Iterator start);
 
   uint64_t m_seq;
+  uint64_t m_message_size;
   uint16_t m_pg;
 public:
   IntHeader ih;

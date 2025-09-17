@@ -107,6 +107,7 @@ public:
 		  // SeqTsHeader
 		  uint16_t pg;
 		  uint64_t seq;
+		  uint64_t message_size;
 		  IntHeader ih;
 	  } udp;
 	  // CnHeader
