@@ -377,6 +377,11 @@ Ptr<RdmaRxQueuePair> RdmaHw::GetRxQp(
     q->sport = sport;
     q->dport = dport;
     q->m_ecn_source.qIndex = pg;
+
+    // init the qp, additional member variables (rouge)
+    // use the UINT64_MAX to indicate special circumstances (init, no message, ...)
+    q->m_curMessageSize = UINT64_MAX;
+
     // store in map
     m_rxQpMap[key] = q;
 	#ifdef NS3_MTP
@@ -456,6 +461,29 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader& ch) {
   rxQp->m_milestone_rx = m_ack_interval;
 
   int x = ReceiverCheckSeq(ch.udp.seq, rxQp, payload_size);
+
+  // rxQp->m_curMessageSize initialized to UINT64_MAX
+  // and seqTs set m_message_size to UINT64_MAX if not the first packet of a message.
+  // So only when the first packet of a new message is received, we update m_curMessageSize
+  if (ch.udp.message_size != UINT64_MAX && rxQp->m_curMessageSize == UINT64_MAX) {
+      NS_LOG_INFO("First packet of a new message received, size=" << ch.udp.message_size);
+      rxQp->m_curMessageSize = ch.udp.message_size;
+  }
+
+  if (x == 1) { // Packet is received correctly
+    NS_ASSERT_MSG(rxQp->m_curMessageSize >= payload_size, "Current message size " << rxQp->m_curMessageSize << " is smaller than payload size " << payload_size);
+    rxQp->m_curMessageSize = std::max(rxQp->m_curMessageSize - payload_size, (uint64_t)0);
+    NS_LOG_DEBUG("After receiving a packet, rxQp->m_curMessageSize=" << rxQp->m_curMessageSize << ", ReceiverNextExpectedSeq=" << rxQp->ReceiverNextExpectedSeq);
+    if (rxQp->m_curMessageSize == 0) {
+        rxQp->m_curMessageSize = UINT64_MAX; // Reset for the next message.
+        // uint64_t corresponding_qp_key = GetQpKey(ch.sip, ch.udp.dport, ch.udp.pg);
+        // NS_LOG_INFO("Triggering m_messageRxCompleteCallback for qp_key=" << ch.sip << ", " << ch.udp.dport << ", " << ch.udp.pg);
+        uint64_t corresponding_qp_key = GetQpKey(ch.dip, ch.udp.sport, ch.udp.pg);
+        NS_LOG_INFO("Message fully received, Triggering m_messageRxCompleteCallback for qp_key=" << ch.dip << ", " << ch.udp.sport << ", " << ch.udp.pg);
+        m_messageRxCompleteCallback(corresponding_qp_key, ch.sip);
+    }
+  }
+
   if (x == 1 || x == 2) { // generate ACK or NACK
     qbbHeader seqh;
     seqh.SetSeq(rxQp->ReceiverNextExpectedSeq);
@@ -769,6 +797,7 @@ Ptr<Packet> RdmaHw::GetNxtPacket(Ptr<RdmaQueuePair> qp) {
   if ((uint64_t)m_mtu < payload_size)
     payload_size = m_mtu;
   Ptr<Packet> p = GenDataPacket(qp, payload_size);
+  NS_LOG_DEBUG("Generate a data packet, qp key is: " << qp->dip.Get() << ", " << qp->sport << ", " << qp->m_pg << ", seq is: " << qp->snd_nxt << ", size is: " << payload_size);
   // update state
   qp->snd_nxt += payload_size;
   // std::cout << "current snd_nxt is: " << qp->snd_nxt << ", the window is: "
@@ -785,6 +814,16 @@ Ptr<Packet> RdmaHw::GenDataPacket(Ptr<RdmaQueuePair> qp, uint32_t pkt_size) {
   SimpleSeqTsHeader seqTs;
   seqTs.SetSeq(qp->snd_nxt);
   seqTs.SetPG(qp->m_pg);
+
+  // in SimpleSeqTsHeader, m_message_size is uint64_t, use the UINT64_MAX to indicate no message
+  seqTs.SetMessageSize(UINT64_MAX);
+  if (qp->snd_nxt == qp->m_messages.front().m_startSeq) {
+    NS_LOG_DEBUG("New message starts at seq " << qp->snd_nxt << ", size is " << qp->m_messages.front().m_size);
+    // a message's size cannot equal to UINT64_MAX, which is used to indicate no message
+    NS_ASSERT_MSG(qp->m_messages.front().m_size != UINT64_MAX, "A message's size cannot be UINT64_MAX");
+    seqTs.SetMessageSize(qp->m_messages.front().m_size);
+  }
+
   p->AddHeader(seqTs);
   // add udp header
   UdpHeader udpHeader;
