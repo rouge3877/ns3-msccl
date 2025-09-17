@@ -81,6 +81,33 @@ public:
     return m_sport;
   }
 
+
+  // my additional functions for recv-complete callback:
+  void AddOperation(const std::string& opType, uint64_t size);
+
+  void AddRxChannel(std::pair<uint64_t, uint32_t> recv_peer);
+  void AddTxChannel(uint64_t send_peer);
+
+  void RunNextStep();
+
+  void DoSend(uint64_t size);
+  void DoRecv();
+
+  void HandleTxComplete();
+  void HandleRxComplete();
+
+  struct RdmaOperation {
+      enum OpType {
+          SEND, RECV
+      };
+      OpType type;
+      uint64_t size; // Meaningful only for SEND operations
+
+      RdmaOperation(OpType t, uint64_t s = 0) : type(t), size(s) {}
+  };
+  std::vector<RdmaOperation> m_operations;
+  size_t m_currentOperationIndex; // Index of the current operation being executed
+
 protected:
   virtual void DoDispose (void);
 

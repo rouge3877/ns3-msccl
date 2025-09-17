@@ -160,11 +160,104 @@ void RdmaClient::StartApplication(void) {
                      m_dport, m_win, m_baseRtt,
                      MakeCallback(&RdmaClient::Finish, this),
                      MakeCallback(&RdmaClient::Sent, this));
+#ifdef OPSETS
+  m_currentOperationIndex = 0;
+  RunNextStep();
+#endif
 }
 
 void RdmaClient::StopApplication() {
   NS_LOG_FUNCTION_NOARGS();
   // TODO stop the queue pair
 }
+
+// my additional functions for recv-complete callback
+
+void RdmaClient::AddRxChannel(std::pair<uint64_t, uint32_t> sender_qp_key)
+{  
+  NS_LOG_FUNCTION_NOARGS();
+  // get RDMA driver and add up queue pair
+  Ptr<Node> node = GetNode();
+  Ptr<RdmaDriver> rdma = node->GetObject<RdmaDriver>();
+  rdma->m_rxCompleteCallbacks[sender_qp_key.first][sender_qp_key.second] = MakeCallback(&RdmaClient::HandleRxComplete, this);
+}
+
+void RdmaClient::AddTxChannel(uint64_t sender_qp_key){
+  
+  NS_LOG_FUNCTION_NOARGS();
+  // get RDMA driver and add up queue pair
+  Ptr<Node> node = GetNode();
+  Ptr<RdmaDriver> rdma = node->GetObject<RdmaDriver>();
+  rdma->m_txCompleteCallbacks[sender_qp_key] = MakeCallback(&RdmaClient::HandleTxComplete, this);
+}
+
+void RdmaClient::AddOperation(const std::string& opType, uint64_t size) {
+  if (opType == "SEND") {
+    m_operations.emplace_back(RdmaOperation::SEND, size);
+    NS_LOG_INFO("Added SEND operation with size " << size << " to the queue.");
+  } else if (opType == "RECV") {
+    m_operations.emplace_back(RdmaOperation::RECV, 0); // RECV 操作的大小无意义
+    NS_LOG_INFO("Added RECV operation to the queue.");
+  } else {
+    NS_LOG_WARN("Unknown operation type specified: " << opType);
+  }
+}
+
+void RdmaClient::DoSend(uint64_t size) {
+    NS_LOG_INFO("AT " << Simulator::Now().GetSeconds() << " Executing SEND operation #" << m_currentOperationIndex << " with size " << size << " at Node" << GetNode()->GetId());
+    this->PushMessagetoQp(size);
+}
+
+void RdmaClient::DoRecv() {
+    NS_LOG_INFO("AT " << Simulator::Now().GetSeconds() << " Executing RECV operation #" << m_currentOperationIndex << ". Waiting for message. at Node" << GetNode()->GetId());
+}
+
+void RdmaClient::RunNextStep() {
+    // 检查是否所有操作都已完成
+    if (m_currentOperationIndex >= m_operations.size()) {
+        NS_LOG_INFO("All configured operations have been completed for this client.");
+        FinishQp(); // 结束 QP
+        return;
+    }
+
+    // 获取当前操作并执行
+    const RdmaOperation& currentOp = m_operations[m_currentOperationIndex];
+    if (currentOp.type == RdmaOperation::SEND) {
+        DoSend(currentOp.size);
+    } else if (currentOp.type == RdmaOperation::RECV) {
+        DoRecv();
+    }
+}
+
+void RdmaClient::HandleTxComplete() {
+    if (m_currentOperationIndex < m_operations.size() &&
+        m_operations[m_currentOperationIndex].type == RdmaOperation::SEND) {
+        
+        NS_LOG_INFO("AT " << Simulator::Now().GetSeconds() << " SEND operation #" << m_currentOperationIndex << " completed. at Node" << GetNode()->GetId());
+        m_currentOperationIndex++;
+        RunNextStep();
+    } else {
+        NS_LOG_WARN("AT " << Simulator::Now().GetSeconds() << " Received an unexpected SendComplete signal.");
+    }
+}
+
+void RdmaClient::HandleRxComplete() {
+
+    // 检查我们是否真的在等待一个接收完成事件
+    if (m_currentOperationIndex < m_operations.size() &&
+        m_operations[m_currentOperationIndex].type == RdmaOperation::RECV) {
+
+        NS_LOG_INFO("AT " << Simulator::Now().GetSeconds() << " RECV operation #" << m_currentOperationIndex << " completed. at Node" << GetNode()->GetId());
+        m_currentOperationIndex++; // 指向下一个操作
+        RunNextStep();             // 执行下一个操作
+    } else {
+        // NS_LOG_WARN(m_currentOperationIndex);
+        // NS_LOG_WARN(m_operations.size());
+        // NS_LOG_WARN(m_operations[m_currentOperationIndex].type);
+        // NS_LOG_WARN(RdmaOperation::RECV);
+        NS_LOG_WARN("AT " << Simulator::Now().GetSeconds() << " Received an unexpected RecvComplete signal. at Node" << GetNode()->GetId());
+    }
+}
+
 
 } // Namespace ns3

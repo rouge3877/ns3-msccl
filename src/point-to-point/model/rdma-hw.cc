@@ -150,7 +150,8 @@ void RdmaHw::SetNode(Ptr<Node> node) {
 void RdmaHw::Setup(
     QpCompleteCallback cb,
     SendCompleteCallback send_cb,
-    MessageCompleteCallback message_cb) {
+    MessageCompleteCallback message_cb,
+    MessageRxCompleteCallback message_rx_cb) {
   tx_bytes.resize(m_nic.size());
   last_tx_bytes.resize(m_nic.size());
   m_nic_peripTable.resize(m_nic.size());
@@ -175,6 +176,7 @@ void RdmaHw::Setup(
   m_qpCompleteCallback = cb;
   m_sendCompleteCallback = send_cb;
   m_messageCompleteCallback = message_cb;
+  m_messageRxCompleteCallback = message_rx_cb;
 }
 uint32_t ip_to_node_id(Ipv4Address ip) {
   return (ip.Get() >> 8) & 0xffff;

@@ -70,6 +70,9 @@ class RdmaHw : public Object {
   typedef Callback<void, Ptr<RdmaQueuePair>, uint64_t> MessageCompleteCallback;
   MessageCompleteCallback m_messageCompleteCallback; //the first message of the qp complete callback
 
+  typedef Callback<void, uint64_t, uint32_t> MessageRxCompleteCallback;
+  MessageRxCompleteCallback m_messageRxCompleteCallback;
+
   // for monitor
   std::vector<uint64_t> tx_bytes; // <port_id, tx_bytes>
   std::unordered_map<uint64_t, uint32_t>
@@ -94,7 +97,8 @@ class RdmaHw : public Object {
   void Setup(
       QpCompleteCallback cb,
       SendCompleteCallback send_cb,
-      MessageCompleteCallback message_cb); // setup shared data and callbacks with the QbbNetDevice
+      MessageCompleteCallback message_cb,
+      MessageRxCompleteCallback message_rx_cb); // setup shared data and callbacks with the QbbNetDevice
   static uint64_t GetQpKey(
       uint32_t dip,
       uint16_t sport,

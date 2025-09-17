@@ -5,6 +5,10 @@ namespace ns3 {
 /***********************
  * RdmaDriver
  **********************/
+
+NS_LOG_COMPONENT_DEFINE("RdmaDriver");
+NS_OBJECT_ENSURE_REGISTERED(RdmaDriver);
+
 TypeId RdmaDriver::GetTypeId (void)
 {
 	static TypeId tid = TypeId ("ns3::RdmaDriver")
@@ -59,10 +63,11 @@ void RdmaDriver::Init(void){
 	#endif
 	// RdmaHw do setup
 	m_rdma->SetNode(m_node);
-        m_rdma->Setup(
-            MakeCallback(&RdmaDriver::QpComplete, this),
-            MakeCallback(&RdmaDriver::SendComplete, this),
-            MakeCallback(&RdmaDriver::MessageComplete, this));
+	m_rdma->Setup(
+		MakeCallback(&RdmaDriver::QpComplete, this),
+		MakeCallback(&RdmaDriver::SendComplete, this),
+		MakeCallback(&RdmaDriver::MessageComplete, this),
+		MakeCallback(&RdmaDriver::MessageRxComplete, this));
 }
 
 void RdmaDriver::SetNode(Ptr<Node> node){
@@ -98,5 +103,34 @@ void RdmaDriver::SendComplete(Ptr<RdmaQueuePair> q){
 }
 void RdmaDriver::MessageComplete(Ptr<RdmaQueuePair> q, uint64_t size) {
 	m_traceMessageComplete(q, size);
+
+	// notify app
+	uint64_t qpKey = RdmaHw::GetQpKey(q->dip.Get(), q->sport, q->m_pg);
+	MessageTxComplete(qpKey);
+}
+
+void RdmaDriver::MessageRxComplete(uint64_t qpKey, uint32_t src) 
+{
+	NS_LOG_INFO("RdmaDriver::MessageRxComplete called for qpKey: " << qpKey << " src: " << src);
+
+	auto it = m_rxCompleteCallbacks.find(qpKey);
+	if (it != m_rxCompleteCallbacks.end())
+	{
+		auto it2 = it->second.find(src);
+		if (it2 != it->second.end())
+		{
+			it2->second();
+		}
+	}
+}
+void RdmaDriver::MessageTxComplete(uint64_t qpKey) 
+{
+	NS_LOG_INFO("RdmaDriver::MessageTxComplete called for qpKey: " << qpKey);
+
+    auto it = m_txCompleteCallbacks.find(qpKey);
+    if (it != m_txCompleteCallbacks.end())
+    {
+        it->second();
+    }
 }
 } // namespace ns3

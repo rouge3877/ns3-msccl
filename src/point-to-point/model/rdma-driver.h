@@ -46,6 +46,19 @@ public:
 	void QpComplete(Ptr<RdmaQueuePair> q);
     void SendComplete(Ptr<RdmaQueuePair> q);
 	void MessageComplete(Ptr<RdmaQueuePair> q, uint64_t size);
+
+	void MessageRxComplete(uint64_t key, uint32_t src);
+	void MessageTxComplete(uint64_t key);
+
+	// Mapping:
+	// 		- QP key: a `uint64_t` number:
+	//				|      32     bits      dip | 16 bits sport | 16  bits  pg |
+	// 			` QP_key = (uint64_t)dip << 32) | ((uint64_t)sport << 16) | (uint64_t)pg `
+	// 
+	// 		- [QP key] <--> QP @ LocalNode) <--> App in the node
+	// 		- [QP key + srcIP (32 bits)] <--> QP @ RemoteNode) <--> App in the node
+	std::map<uint64_t, std::map<uint32_t, Callback<void>>> m_rxCompleteCallbacks;
+	std::map<uint64_t, Callback<void>> m_txCompleteCallbacks;
 };
 
 } // namespace ns3
