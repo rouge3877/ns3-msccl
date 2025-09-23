@@ -438,6 +438,7 @@ int RdmaHw::SendPacketComplete(Ptr<Packet> p, CustomHeader& ch) {
   // uint32_t nic_idx = GetNicIdxOfQp(qp);
   // Ptr<QbbNetDevice> dev = m_nic[nic_idx].dev;
   SendComplete(qp);
+  return 0;
 }
 
 void RdmaHw::SendComplete(Ptr<RdmaQueuePair> qp) {
@@ -959,7 +960,7 @@ void RdmaHw::PrintQPCnpNumber(FILE* cnp_output) {
     if (qp_cnp[key] != last_qp_cnp[key]) {
       fprintf(
           cnp_output,
-          "%lu, %u, %u, %u, %u, %u, %u\n",
+          "%lu, %u, %u, %u, %u, %lu, %u\n",
           Simulator::Now().GetTimeStep(),
           qp->m_src,
           qp->m_dest,
