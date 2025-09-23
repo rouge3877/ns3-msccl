@@ -96,6 +96,12 @@ public:
   void HandleTxComplete();
   void HandleRxComplete();
 
+  // Validation methods for attribute constraints
+  void SetPassiveDestroy(bool value);
+  bool GetPassiveDestroy() const;
+  void SetOperationsRun(bool value);
+  bool GetOperationsRun() const;
+
   struct RdmaOperation {
       enum OpType {
           SEND, RECV
@@ -130,6 +136,7 @@ private:
   uint64_t dest; 
   uint32_t nvls_enable;
   bool m_passiveDestroy; // if true, qp will destroy itself when no more message to send
+  bool m_operationsRun; // if true, run operations one by one
 };
 
 } // namespace ns3

@@ -66,7 +66,8 @@ Ptr<RdmaClient> getClient(uint32_t src, uint32_t dst, uint32_t pg, uint32_t dpor
           1,
           src,
           dst,
-          false);
+          false,
+          false); // passive destroy, operations run
       apps[hashKey].Add(clientHelper.Install(n.Get(src)));
     //   std::cout<<Simulator::Now().GetTimeStep()<<" " <<hashKey<<" add a client at node "<<src<<endl;
     }

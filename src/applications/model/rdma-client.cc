@@ -37,7 +37,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// #define OPSETS
 
 namespace ns3 {
 
@@ -91,7 +90,13 @@ TypeId RdmaClient::GetTypeId(void) {
           .AddAttribute("PassiveDestroy",
                         "Qp passively destroy when no more message",
                         BooleanValue(false),
-                        MakeBooleanAccessor(&RdmaClient::m_passiveDestroy),
+                        MakeBooleanAccessor(&RdmaClient::SetPassiveDestroy,
+                                          &RdmaClient::GetPassiveDestroy),
+                        MakeBooleanChecker())
+          .AddAttribute("OperationsRun", "If run in operations mode (Must with false PassiveDestroy attr)",
+                        BooleanValue(false),
+                        MakeBooleanAccessor(&RdmaClient::SetOperationsRun,
+                                          &RdmaClient::GetOperationsRun),
                         MakeBooleanChecker());
   return tid;
 }
@@ -152,6 +157,12 @@ void RdmaClient::DoDispose(void) {
 
 void RdmaClient::StartApplication(void) {
   NS_LOG_FUNCTION_NOARGS();
+  
+  // Validate attribute constraints
+  if (m_passiveDestroy && m_operationsRun) {
+    NS_FATAL_ERROR("Invalid configuration: PassiveDestroy and OperationsRun cannot both be true");
+  }
+  
   // get RDMA driver and add up queue pair
   Ptr<Node> node = GetNode();
   Ptr<RdmaDriver> rdma = node->GetObject<RdmaDriver>();
@@ -162,10 +173,13 @@ void RdmaClient::StartApplication(void) {
                      m_dport, m_win, m_baseRtt,
                      MakeCallback(&RdmaClient::Finish, this),
                      MakeCallback(&RdmaClient::Sent, this));
-#ifdef OPSETS
-  m_currentOperationIndex = 0;
-  RunNextStep();
-#endif
+
+  if (m_operationsRun && !m_passiveDestroy) {
+    NS_LOG_INFO("RdmaClient starting in OperationsRun mode.");
+    std::cout << "RdmaClient starting in OperationsRun mode." << std::endl;
+    m_currentOperationIndex = 0;
+    RunNextStep();
+  }
 }
 
 void RdmaClient::StopApplication() {
@@ -261,5 +275,25 @@ void RdmaClient::HandleRxComplete() {
     }
 }
 
+// Validation methods for attribute constraints
+void RdmaClient::SetPassiveDestroy(bool value) {
+    if (value && m_operationsRun)
+        NS_FATAL_ERROR("Cannot set PassiveDestroy to true when OperationsRun is true");
+    m_passiveDestroy = value;
+}
+
+bool RdmaClient::GetPassiveDestroy() const {
+    return m_passiveDestroy;
+}
+
+void RdmaClient::SetOperationsRun(bool value) {
+    if (value && m_passiveDestroy)
+        NS_FATAL_ERROR("Cannot set OperationsRun to true when PassiveDestroy is true");
+    m_operationsRun = value;
+}
+
+bool RdmaClient::GetOperationsRun() const {
+    return m_operationsRun;
+}
 
 } // Namespace ns3

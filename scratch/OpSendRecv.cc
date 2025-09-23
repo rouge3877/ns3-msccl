@@ -127,10 +127,10 @@ int main(int argc, char *argv[])
 
     RdmaClientHelper clientHelper0(
         (uint16_t)3, serverAddress[0], serverAddress[1], 10000, 100,
-        0, 0, maxRtt, nullptr, nullptr, 1, 0, 1);
+        0, 0, maxRtt, nullptr, nullptr, 1, 0, 1, false, true);
     RdmaClientHelper clientHelper1(
         (uint16_t)3, serverAddress[1], serverAddress[0], 10000, 100,
-        0, 0, maxRtt, nullptr, nullptr, 1, 0, 1);
+        0, 0, maxRtt, nullptr, nullptr, 1, 0, 1, false, true);
 
     ApplicationContainer appCon0 = clientHelper0.Install(n.Get(0));
     ApplicationContainer appCon1 = clientHelper1.Install(n.Get(1));
