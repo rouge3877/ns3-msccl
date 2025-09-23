@@ -1,5 +1,5 @@
 # INPUT FILE PATH
-TOPOLOGY_FILE ./examples/my-rdma-test/my-TOPO
+TOPOLOGY_FILE ./examples/my-rdma-test/topos/topo3
 FLOW_FILE ./examples/my-rdma-test/flows/1to1.txt
 
 # OUTPUT FILE PATH
