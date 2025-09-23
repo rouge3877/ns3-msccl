@@ -742,6 +742,7 @@ void RdmaHw::QpComplete(Ptr<RdmaQueuePair> qp) {
 void RdmaHw::QpCompleteMessage(Ptr<RdmaQueuePair> qp) {
   // qp->m_messages.front().m_notifyAppFinish();
   // callback
+  NS_ABORT_MSG_IF(qp->m_messages.empty(), "No message in qp, but QpCompleteMessage is called");
   RdmaQueuePair::RdmaMessage msg = qp->m_messages.front();
   qp->FinishMessage();
   m_messageCompleteCallback(qp, msg.m_size);
@@ -818,7 +819,12 @@ Ptr<Packet> RdmaHw::GenDataPacket(Ptr<RdmaQueuePair> qp, uint32_t pkt_size) {
 
   // in SimpleSeqTsHeader, m_message_size is uint64_t, use the UINT64_MAX to indicate no message
   seqTs.SetMessageSize(UINT64_MAX);
-  if (qp->snd_nxt == qp->m_messages.front().m_startSeq) {
+  if (qp->m_messages.empty()){
+    NS_LOG_INFO("No message in qp, but GenDataPacket is called");
+    seqTs.SetMessageSize(pkt_size); // just set it to pkt_size to avoid confusion
+  }
+  if (qp->m_messages.empty() == false &&
+    qp->snd_nxt == qp->m_messages.front().m_startSeq) {
     NS_LOG_DEBUG("New message starts at seq " << qp->snd_nxt << ", size is " << qp->m_messages.front().m_size);
     // a message's size cannot equal to UINT64_MAX, which is used to indicate no message
     NS_ASSERT_MSG(qp->m_messages.front().m_size != UINT64_MAX, "A message's size cannot be UINT64_MAX");
@@ -933,6 +939,13 @@ void RdmaHw::PrintQPRate(FILE* rate_output) {
     // if (qp->m_rate.GetBitRate() == last_qp_rate[key]) {
     //   continue;
     // }
+    uint64_t cur_size = 0;
+    if (qp->m_messages.empty()) {
+      NS_LOG_WARN("No message in qp, but PrintQPRate is called");
+      cur_size = UINT64_MAX;
+    } else {
+      cur_size = qp->snd_nxt - qp->m_messages.front().m_startSeq;
+    }
     fprintf(
         rate_output,
         "%lu, %u, %u, %u, %u, %lu, %lu\n",
@@ -941,7 +954,7 @@ void RdmaHw::PrintQPRate(FILE* rate_output) {
         qp->m_dest,
         qp->sport,
         qp->dport,
-        qp->snd_nxt - qp->m_messages.front().m_startSeq,
+        cur_size,
         qp->m_rate.GetBitRate());
     fflush(rate_output);
     last_qp_rate[key] = qp->m_rate.GetBitRate();
@@ -957,6 +970,14 @@ void RdmaHw::PrintQPCnpNumber(FILE* cnp_output) {
   for (; it != m_qpMap.end(); it++) {
     Ptr<RdmaQueuePair> qp = it->second;
     uint64_t key = it->first;
+
+    uint64_t cur_size = 0;
+    if (qp->m_messages.empty()) {
+      NS_LOG_WARN("No message in qp, but PrintQPCnpNumber is called");
+      cur_size = UINT64_MAX;
+    } else {
+      cur_size =qp->m_messages.front().m_size;
+    }
     if (qp_cnp[key] != last_qp_cnp[key]) {
       fprintf(
           cnp_output,
@@ -966,7 +987,7 @@ void RdmaHw::PrintQPCnpNumber(FILE* cnp_output) {
           qp->m_dest,
           qp->sport,
           qp->dport,
-          qp->m_messages.front().m_size,
+          cur_size,
           qp_cnp[key]);
       fflush(cnp_output);
       last_qp_cnp[key] = qp_cnp[key];
