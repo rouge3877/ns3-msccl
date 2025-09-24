@@ -601,6 +601,7 @@ int RdmaHw::ReceiveAck(Ptr<Packet> p, CustomHeader& ch) {
       qp->Acknowledge(goback_seq);
     }
     if (qp->IsCurMessageFinished()) {
+      NS_LOG_DEBUG("Message finished, trigger m_messageCompleteCallback for qp_key=" << ch.sip << ", " << port << ", " << qIndex);
       QpCompleteMessage(qp);
       // if (qp->IsFinished()) {
       //   QpComplete(qp);
@@ -740,6 +741,9 @@ void RdmaHw::QpComplete(Ptr<RdmaQueuePair> qp) {
 }
 
 void RdmaHw::QpCompleteMessage(Ptr<RdmaQueuePair> qp) {
+#ifdef NS3_MTP
+  MtpInterface::explicitCriticalSection cs;
+#endif
   // qp->m_messages.front().m_notifyAppFinish();
   // callback
   NS_ABORT_MSG_IF(qp->m_messages.empty(), "No message in qp, but QpCompleteMessage is called");
@@ -749,10 +753,17 @@ void RdmaHw::QpCompleteMessage(Ptr<RdmaQueuePair> qp) {
   if(!qp->m_messages.empty()){
     // Have more messages to send
     // std::cout<<"at "<<Simulator::Now().GetTimeStep()<<"ns, qp src:"<<qp->m_src<<" dst:"<<qp->m_dest<<" port:"<<qp->sport<<" dport:"<<qp->dport<<" has more messages to send\n";
-    qp->m_messages.front().m_startSeq = qp->snd_nxt;
+    if (qp->m_messages.front().m_setupd == false) {
+      qp->m_messages.front().m_setupd = true;
+      qp->m_messages.front().m_startSeq = qp->snd_nxt;
+    }
+    NS_LOG_DEBUG("qp->m_messages is not empty after finishing a message, the next message starts at seq " << qp->m_messages.front().m_startSeq << ", size is: " << qp->m_messages.front().m_size);
     uint32_t nic_idx = GetNicIdxOfQp(qp);
     m_nic[nic_idx].dev->TriggerTransmit();
   }
+#ifdef NS3_MTP
+  cs.ExitSection();
+#endif
 }
 
 void RdmaHw::SetLinkDown(Ptr<QbbNetDevice> dev) {

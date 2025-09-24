@@ -114,6 +114,7 @@ class RdmaQueuePair : public Object {
    public:
     uint64_t m_size;
     uint64_t m_startSeq;
+    bool m_setupd = false;
     Callback<void> m_notifyAppFinish;
     Callback<void> m_notifyAppSent;
   };

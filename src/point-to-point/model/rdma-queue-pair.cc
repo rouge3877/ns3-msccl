@@ -152,10 +152,17 @@ void RdmaQueuePair::PushMessage(
     uint64_t size,
     Callback<void> notifyAppFinish,
     Callback<void> notifyAppSent) {
+#ifdef NS3_MTP
+  MtpInterface::explicitCriticalSection cs;
+#endif
   RdmaMessage msg;
   msg.m_size = size;
   if(m_messages.empty()) {
-    msg.m_startSeq = snd_nxt; // there are no old messages in the queue, so set start_seq to snd_nxt
+    if (msg.m_setupd == false) {
+      msg.m_setupd = true;
+      msg.m_startSeq = snd_nxt; // there are no old messages in the queue, so set start_seq to snd_nxt
+    }
+    NS_LOG_DEBUG("qp->m_messages is empty when pushing a new message, the new message starts at seq " << snd_nxt << ", size is: " << size);
   } else {
     msg.m_startSeq = 0; // there are old messages in the queue, so modify start_seq when finish an old message
   }
@@ -163,6 +170,9 @@ void RdmaQueuePair::PushMessage(
   msg.m_notifyAppFinish = notifyAppFinish;
   msg.m_notifyAppSent = notifyAppSent;
   m_messages.push(msg);
+#ifdef NS3_MTP
+  cs.ExitSection();
+#endif
 }
 
 void RdmaQueuePair::FinishMessage() {
@@ -179,8 +189,11 @@ void RdmaQueuePair::FinishMessage() {
 
 bool RdmaQueuePair::IsCurMessageFinished() {
   if (m_messages.empty()) {
+    NS_LOG_DEBUG("Current Messgae is finished because m_messages is empty");
     return true;
   }
+  if (snd_una >= m_messages.front().m_size + m_messages.front().m_startSeq)
+    NS_LOG_DEBUG("Current Message is finished because snd_una " << snd_una << " >= front message size " << m_messages.front().m_size << " + startSeq " << m_messages.front().m_startSeq);
   return snd_una >= m_messages.front().m_size + m_messages.front().m_startSeq;
 }
 
