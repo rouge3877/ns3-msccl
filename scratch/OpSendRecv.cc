@@ -26,12 +26,9 @@ using namespace ns3;
 
 extern uint32_t node_num, switch_num, link_num, trace_num, nvswitch_num, gpus_per_server;
 extern std::unordered_map<uint32_t, unordered_map<uint32_t, uint16_t>> portNumber;
-extern std::ifstream flowf;
-extern FlowInput flow_input;
 
-uint32_t flow_num_finished = 0;
 
-void qp_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q)
+void my_qp_finish(FILE *fout, Ptr<RdmaQueuePair> q)
 {
     uint32_t sid = ip_to_node_id(q->sip), did = ip_to_node_id(q->dip);
 #ifdef NS3_MTP
@@ -40,16 +37,19 @@ void qp_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q)
     Ptr<Node> dstNode = n.Get(did);
     Ptr<RdmaDriver> rdma = dstNode->GetObject<RdmaDriver>();
     rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
-    std::cout << "at " << Simulator::Now().GetNanoSeconds() << "ns, qp finish, src: " << sid << " did: " << did
-              << " port: " << q->sport << std::endl;
+
+    NS_LOG_INFO("QP FINISH: src " << sid << " did " << did << " port " << q->sport);
+
+    cancel_monitor();
 #ifdef NS3_MTP
     cs.ExitSection();
 #endif
 }
 
-void send_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q)
+void my_send_finish(FILE *fout, Ptr<RdmaQueuePair> q)
 {
     // Seems that the occasion to call this function is error-prone !!! (rouge)
+    // rouge: this function is called when send is finished (without ack) ! (rouge after)
 #ifdef NS3_MTP
     MtpInterface::explicitCriticalSection cs;
 #endif
@@ -60,8 +60,11 @@ void send_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q)
 #endif
 }
 
-void message_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q, uint64_t msgSize)
+void my_message_finish(FILE *fout, Ptr<RdmaQueuePair> q, uint64_t msgSize)
 {
+#ifdef NS3_MTP
+    MtpInterface::explicitCriticalSection cs;
+#endif
     uint32_t sid = ip_to_node_id(q->sip), did = ip_to_node_id(q->dip);
     uint64_t base_rtt = pairRtt[sid][did], b = pairBw[sid][did];
     uint32_t packet_payload_size =
@@ -86,16 +89,13 @@ void message_finish_normal(FILE *fout, Ptr<RdmaQueuePair> q, uint64_t msgSize)
         standalone_fct);
     fflush(fout);
 
-    std::cout << "at " << Simulator::Now().GetNanoSeconds() << "ns, message finish, src: " << sid << " did: " << did
-              << " port: " << q->sport << " total bytes: " << size << std::endl;
-    Ptr<Node> dstNode = n.Get(did);
-    Ptr<RdmaDriver> rdma = dstNode->GetObject<RdmaDriver>();
-    rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
-    flow_num_finished++;
-    if (flow_num_finished == flow_num)
-    {
-        cancel_monitor();
-    }
+    NS_LOG_INFO("MESSAGE FINISH: src " << sid << " did " << did << " port " << q->sport << " size " << size);
+    // Ptr<Node> dstNode = n.Get(did);
+    // Ptr<RdmaDriver> rdma = dstNode->GetObject<RdmaDriver>();
+    // rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
+#ifdef NS3_MTP
+    cs.ExitSection();
+#endif
 }
 
 int main(int argc, char *argv[])
@@ -108,17 +108,13 @@ int main(int argc, char *argv[])
 #endif
 
     LogComponentEnable("GENERIC_SIMULATION", LOG_LEVEL_INFO);
-    // LogComponentEnable("RdmaClient", LOG_LEVEL_INFO);
-    // LogComponentEnable("RdmaDriver", LOG_LEVEL_INFO);
-    // LogComponentEnable("RdmaHw", LOG_LEVEL_INFO);
-    // LogComponentEnable("QbbNetDevice", LOG_LEVEL_INFO);
 
     CommandLine cmd;
     cmd.Parse(argc, argv);
     if (!ReadConf(argc, argv))
         return -1;
     SetConfig();
-    SetupNetwork(qp_finish_normal, send_finish_normal, message_finish_normal);
+    SetupNetwork(my_qp_finish, my_send_finish, my_message_finish);
     fflush(stdout);
 
     //////////////////////////////////////////////////////////////////////////////////////////////
@@ -146,13 +142,12 @@ int main(int argc, char *argv[])
     client1->AddTxChannel(node1_sender_qp_key);
     client0->AddRxChannel(std::make_pair(node1_sender_qp_key, node1_sip));
     client1->AddRxChannel(std::make_pair(node0_sender_qp_key, node0_sip));
-    
-    client0->AddOperation("SEND", 40000000);
-    // client0->AddOperation("SEND", 40000);
-    // client0->AddOperation("RECV", 0);
-    // client1->AddOperation("RECV", 0);
-    client1->AddOperation("RECV", 0);
-    // client1->AddOperation("SEND", 40000000);
+
+    for (uint32_t i = 0; i < 10; i++) {
+        client0->AddOperation("SEND", 40000);
+        client1->AddOperation("RECV", 0);
+    }
+
     appCon0.Start(Time(Seconds(2)));
     appCon1.Start(Time(Seconds(2)));
 

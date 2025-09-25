@@ -176,7 +176,6 @@ void RdmaClient::StartApplication(void) {
 
   if (m_operationsRun && !m_passiveDestroy) {
     NS_LOG_INFO("RdmaClient starting in OperationsRun mode.");
-    std::cout << "RdmaClient starting in OperationsRun mode." << std::endl;
     m_currentOperationIndex = 0;
     RunNextStep();
   }
@@ -210,7 +209,7 @@ void RdmaClient::AddTxChannel(uint64_t sender_qp_key){
 void RdmaClient::AddOperation(const std::string& opType, uint64_t size) {
   if (opType == "SEND") {
     m_operations.emplace_back(RdmaOperation::SEND, size);
-    NS_LOG_INFO("Added SEND operation, size = " << size << " .");
+    NS_LOG_INFO("Added SEND operation, size = " << size);
   } else if (opType == "RECV") {
     m_operations.emplace_back(RdmaOperation::RECV, 0); // RECV 操作的大小无意义
     NS_LOG_INFO("Added RECV operation.");
