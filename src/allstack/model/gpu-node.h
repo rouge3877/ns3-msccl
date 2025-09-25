@@ -1,0 +1,34 @@
+#ifndef GPU_NODE_H
+#define GPU_NODE_H
+
+#include "ns3/node.h"
+#include "ns3/thread-block.h"
+
+namespace ns3
+{
+class ThreadBlock;
+
+class GPUNode : public Node
+{
+    public:
+        /**
+         * \brief Get the type ID.
+         * \return the object TypeId
+         */
+        static TypeId GetTypeId();
+
+        uint32_t AddThreadBlock(Ptr<ThreadBlock> tb);
+        void UpdateTBStatus(uint32_t index, uint32_t step);
+        int GetTBStatus(uint32_t index);
+
+    protected:
+        void DoDispose() override;
+
+    private:
+        std::vector<int>m_tb_status;
+        std::vector<Ptr<ThreadBlock>> m_threadblocks;
+};
+
+}
+
+#endif /* GPU_NODE_H */

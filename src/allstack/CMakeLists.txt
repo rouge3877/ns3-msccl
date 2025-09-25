@@ -1,0 +1,19 @@
+build_lib(
+    LIBNAME allstack
+    SOURCE_FILES
+        model/gpu-node.cc
+        model/thread-block.cc
+        model/thread-block-step.cc
+        helper/gpu-threadblock-helper.cc
+        utils/tinyxml2.cpp
+    HEADER_FILES
+        model/gpu-node.h
+        model/thread-block.h
+        model/thread-block-step.h
+        helper/gpu-threadblock-helper.h
+        utils/tinyxml2.h
+    LIBRARIES_TO_LINK
+        ${libnetwork}
+        ${libapplications}
+    TEST_SOURCES
+)
