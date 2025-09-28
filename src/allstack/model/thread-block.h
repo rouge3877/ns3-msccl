@@ -4,6 +4,11 @@
 #include "ns3/thread-block-step.h"
 #include "ns3/gpu-node.h"
 #include "ns3/application.h"
+#include "ns3/rdma-client.h"
+
+#ifdef NS3_MTP
+#include "ns3/mtp-interface.h"
+#endif
 
 namespace ns3
 {
@@ -27,9 +32,20 @@ class ThreadBlock : public Application
         void SetGPUNode(Ptr<GPUNode> node);
 
         uint32_t GetId() const;
+        int GetSend() const;
+        int GetRecv() const;
+        int GetChannel() const;
         uint32_t AddStep(Ptr<ThreadBlockStep> step);
 
         void UpdateTBStatus(uint32_t index, uint32_t step); 
+
+        void BindRdmaClient(Ptr<RdmaClient> client);
+        Ptr<RdmaClient> GetRdmaClient();
+
+        void RecvMessageDone();
+        void SendMessageDone();
+        
+        void CompleteThreadBlock();
 
     protected:
         void DoDispose() override;
@@ -53,6 +69,17 @@ class ThreadBlock : public Application
         bool m_waitDep;
         uint32_t m_depid;
         uint32_t m_deps;
+
+        int m_send;             //!< Send Peer rank
+        int m_recv;             //!< Recv Peer rank
+        int m_channel;          //!< Channel id
+        uint32_t m_chunkSize;   //!< Chunk Size (send size = chunksize * chunknum)
+
+        std::vector<Ptr<RdmaClient>> m_rdma_clients;
+        Ptr<RdmaClient> m_rdma_client;
+
+        int m_recv_message_num;   //!< number of recv messages, stay in buffer
+        int m_total_send_message_num;   //!< number of messages to send, for synchronization
 };
 
 }

@@ -1,6 +1,7 @@
 #include "gpu-threadblock-helper.h"
 
 #include "ns3/uinteger.h"
+#include "ns3/integer.h"
 #include "ns3/string.h"
 #include "ns3/boolean.h"
 
@@ -56,6 +57,12 @@ ThreadBlockHelper::ThreadBlockHelper(tinyxml2::XMLElement * config)
 
     SetAttribute("id",
         UintegerValue(static_cast<uint32_t>(std::stoul(m_config->Attribute("id")))));
+    SetAttribute("send",
+        IntegerValue(static_cast<int32_t>(std::stoi(m_config->Attribute("send")))));
+    SetAttribute("recv",
+        IntegerValue(static_cast<int32_t>(std::stoi(m_config->Attribute("recv")))));
+    SetAttribute("channel",
+        IntegerValue(static_cast<int32_t>(std::stoi(m_config->Attribute("chan")))));
 }
 
 void

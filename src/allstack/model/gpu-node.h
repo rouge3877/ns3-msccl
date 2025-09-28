@@ -21,12 +21,21 @@ class GPUNode : public Node
         void UpdateTBStatus(uint32_t index, uint32_t step);
         int GetTBStatus(uint32_t index);
 
+        int GetRank() const;
+        void SetRank(int rank);
+        Ptr<ThreadBlock> GetThreadBlock(uint32_t index) const;
+        uint32_t GetNThreadBlocks() const;
+
+        int FinishedTBCallback();
+
     protected:
         void DoDispose() override;
 
     private:
+        int m_rank;      //!< rank of this GPU node
         std::vector<int>m_tb_status;
         std::vector<Ptr<ThreadBlock>> m_threadblocks;
+        int m_tb_complete_count = 0;
 };
 
 }
