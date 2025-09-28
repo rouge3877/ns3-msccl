@@ -114,6 +114,11 @@ public:
   std::vector<RdmaOperation> m_operations;
   size_t m_currentOperationIndex; // Index of the current operation being executed
 
+  Callback<void> m_notifyTxComplete;
+  Callback<void> m_notifyRxComplete;
+
+  void SetAboveLayerCallback(Callback<void> tx, Callback<void> rx);
+
 protected:
   virtual void DoDispose (void);
 
@@ -135,8 +140,8 @@ private:
   uint64_t src; 
   uint64_t dest; 
   uint32_t nvls_enable;
-  bool m_passiveDestroy; // if true, qp will destroy itself when no more message to send
-  bool m_operationsRun; // if true, run operations one by one
+  bool m_passiveDestroy = false; // if true, qp will destroy itself when no more message to send
+  bool m_operationsRun = false; // if true, run operations one by one
 };
 
 } // namespace ns3

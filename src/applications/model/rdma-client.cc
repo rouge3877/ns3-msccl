@@ -93,7 +93,8 @@ TypeId RdmaClient::GetTypeId(void) {
                         MakeBooleanAccessor(&RdmaClient::SetPassiveDestroy,
                                           &RdmaClient::GetPassiveDestroy),
                         MakeBooleanChecker())
-          .AddAttribute("OperationsRun", "If run in operations mode (Must with false PassiveDestroy attr)",
+          .AddAttribute("OperationsRun",
+                        "If run in operations mode (Must with false PassiveDestroy attr). And if not run in operations mode, a above layer callback should be set.",
                         BooleanValue(false),
                         MakeBooleanAccessor(&RdmaClient::SetOperationsRun,
                                           &RdmaClient::GetOperationsRun),
@@ -173,11 +174,22 @@ void RdmaClient::StartApplication(void) {
                      m_dport, m_win, m_baseRtt,
                      MakeCallback(&RdmaClient::Finish, this),
                      MakeCallback(&RdmaClient::Sent, this));
+}
+
+void RdmaClient::StartApplication(void) {
+  NS_LOG_FUNCTION_NOARGS();
+  
+  // Validate attribute constraints
+  if (m_passiveDestroy && m_operationsRun) {
+    NS_FATAL_ERROR("Invalid configuration: PassiveDestroy and OperationsRun cannot both be true");
+  }
 
   if (m_operationsRun && !m_passiveDestroy) {
     NS_LOG_INFO("RdmaClient starting in OperationsRun mode.");
     m_currentOperationIndex = 0;
     RunNextStep();
+  } else {
+    NS_LOG_INFO("RdmaClient started in non-operations mode.");
   }
 }
 
@@ -219,19 +231,27 @@ void RdmaClient::AddOperation(const std::string& opType, uint64_t size) {
 }
 
 void RdmaClient::DoSend(uint64_t size) {
+  NS_ASSERT_MSG(size > 0, "SEND operation must have a positive size");
+  if (m_operationsRun)
     NS_LOG_INFO("Executing SEND operation #" << m_currentOperationIndex << " with size " << size);
+  else
+    NS_LOG_INFO("Executing SEND operation with size " << size);
+
     this->PushMessagetoQp(size);
 }
 
 void RdmaClient::DoRecv() {
+  if (m_operationsRun)
     NS_LOG_INFO("Executing RECV operation #" << m_currentOperationIndex << ". Waiting for message...");
+  else
+    NS_LOG_INFO("Executing RECV operation. Waiting for message...");
 }
 
 void RdmaClient::RunNextStep() {
     // 检查是否所有操作都已完成
     if (m_currentOperationIndex >= m_operations.size()) {
         NS_LOG_INFO("All configured operations have been completed.");
-        FinishQp(); // 结束 QP
+        FinishQp(); // 结束 QP !!!! 这里如果当 Send 完成表示 接受ack时没问题，如果send立即返回则会出现问题（无法接受的问题）
         return;
     }
 
@@ -245,6 +265,7 @@ void RdmaClient::RunNextStep() {
 }
 
 void RdmaClient::HandleTxComplete() {
+  if (m_operationsRun) {
     if (m_currentOperationIndex < m_operations.size() &&
         m_operations[m_currentOperationIndex].type == RdmaOperation::SEND) {
         
@@ -254,10 +275,15 @@ void RdmaClient::HandleTxComplete() {
     } else {
         NS_LOG_WARN("Received an unexpected SendComplete signal.");
     }
+  } else {
+    NS_LOG_INFO("SEND operation completed in non-operations mode.");
+    if (!m_notifyTxComplete.IsNull())
+      m_notifyTxComplete();
+    }
 }
 
 void RdmaClient::HandleRxComplete() {
-
+  if (m_operationsRun) {
     // 检查我们是否真的在等待一个接收完成事件
     if (m_currentOperationIndex < m_operations.size() &&
         m_operations[m_currentOperationIndex].type == RdmaOperation::RECV) {
@@ -271,6 +297,11 @@ void RdmaClient::HandleRxComplete() {
         // NS_LOG_WARN(m_operations[m_currentOperationIndex].type);
         // NS_LOG_WARN(RdmaOperation::RECV);
         NS_LOG_WARN("Received an unexpected RecvComplete signal.");
+    }
+  } else {
+    NS_LOG_INFO("RECV operation completed in non-operations mode.");
+    NS_ASSERT_MSG(!m_notifyRxComplete.IsNull(), "RxComplete callback is null in non-operations mode");
+    m_notifyRxComplete();
     }
 }
 
@@ -293,6 +324,11 @@ void RdmaClient::SetOperationsRun(bool value) {
 
 bool RdmaClient::GetOperationsRun() const {
     return m_operationsRun;
+}
+
+void RdmaClient::SetAboveLayerCallback(Callback<void> tx, Callback<void> rx) {
+  m_notifyTxComplete = tx;
+  m_notifyRxComplete = rx;
 }
 
 } // Namespace ns3
