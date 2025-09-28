@@ -2,6 +2,7 @@
 /*
 !.gitignore
 !subdir/
+!msccl/
 !scratch-simulator.cc
 !CMakeLists.txt
 !common.h
