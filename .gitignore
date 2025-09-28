@@ -79,3 +79,8 @@ vcpkg/
 .cache/
 
 .vscode/
+
+.gdb_history
+perf.data*
+out.perf
+out.folded
