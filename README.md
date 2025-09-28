@@ -81,10 +81,13 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
 - [ ] `flow` with different start timestamps (`QpReuseNetwork.cc`)
     - **Q**：当`flow_input` 文件中多个流之间存在显著的开始时间差异时，整体模拟时间会增加
     - **Perf**：`ns3::QbbNetDevice::DequeueAndTransmit` 占用大量 CPU 时间
+    - ![image](.assets/QpReuse-DequeueAndTransmit.png)
+    - **A**: TxDequeueMode::DWRR
 
 - [ ] Message Size 较大时模拟时间过长 (`msccl/main.cc`)
     - **Q**：在处理大规模数据传输时，模拟时间不成比例地增加，表明存在扩展性瓶颈。
     - **Perf**：`ns3::QbbNetDevice::DequeueAndTransmit` 占用大量 CPU 时间
+    - ![image](.assets/MSCCL-DequeueAndTransmit.png)
 
 - [ ] 自动化队列对（QP）的销毁
     - **Q**：目前需要手动调用 `RdmaClient::FinishQp` 来释放队列对资源。

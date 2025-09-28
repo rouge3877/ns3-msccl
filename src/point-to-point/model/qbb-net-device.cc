@@ -84,7 +84,7 @@ TypeId RdmaEgressQueue::GetTypeId(void) {
           .AddAttribute(
               "TxDequeueMode",
               "The mode of TxDequeue",
-              EnumValue(TxDequeueMode::DWRR),
+              EnumValue(TxDequeueMode::QP_AVAIL),
               MakeEnumAccessor(&RdmaEgressQueue::m_txDequeueMode),
               MakeEnumChecker(
                   TxDequeueMode::DWRR, "DWRR",
