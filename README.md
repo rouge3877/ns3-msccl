@@ -5,6 +5,19 @@ Based on [ns-3-alibabacloud](https://github.com/aliyun/ns-3-alibabacloud)
 ## Run
 
 ```bash
+make conf
+make log-rdma msccl-perf
+make log-scheduler qpreuse-debug
+# ...
+# see Makefile for more
+```
+
+<details>
+
+<summary>or Run:</summary>
+
+
+```bash
 ./ns3 configure -d default --enable-examples --disable-mtp
 
 # RdmaClient run in Operations Mode: Add a set of options to configure the simulation
@@ -18,8 +31,13 @@ NS_LOG="MSCCL=all|prefix_all:ThreadBlock=all|prefix_all:RdmaClient=info|prefix_a
 
 Debug:
 ```bash
+# ns3-msccl
 ./ns3 configure -d debug --enable-examples --disable-mtp
-NS_LOG="DefaultSimulatorImpl=all|prefix_all" ./ns3 run 'scratch/msccl/main' --command-template='gdb --args %s examples/allstack/config.sh'
+NS_LOG="" ./ns3 run 'scratch/msccl/main' --command-template='gdb --args %s examples/allstack/config.sh'
+
+# QpReuseNetwork
+./ns3 configure -d debug --enable-examples --disable-mtp
+NS_LOG="" ./ns3 run 'scratch/QpReuseNetwork' --command-template='gdb --args %s examples/my-rdma-test/config_1to1.sh'
 ```
 
 Perf:
@@ -36,6 +54,7 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
 sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.pl > QpReuseNetwork.svg
 ```
 
+</details>
 
 ## TODO List
 
