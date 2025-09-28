@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <iostream>
+#include <iomanip>
 #include "ns3/assert.h"
 #include "ns3/boolean.h"
 #include "ns3/cn-header.h"
@@ -301,15 +302,21 @@ QbbNetDevice::QbbNetDevice() {
     m_paused[i] = false;
   }
 
+  // Initialize statistics counters
+  m_hasPacketCount = 0;
+  m_noPacketCount = 0;
+
   m_rdmaEQ = CreateObject<RdmaEgressQueue>();
 }
 
 QbbNetDevice::~QbbNetDevice() {
   NS_LOG_FUNCTION(this);
+  PrintDequeueStats();
 }
 
 void QbbNetDevice::DoDispose() {
   NS_LOG_FUNCTION(this);
+  PrintDequeueStats();
   PointToPointNetDevice::DoDispose();
 }
 
@@ -355,6 +362,10 @@ void QbbNetDevice::DequeueAndTransmit(void) {
     std::pair<Ptr<RdmaQueuePair>, Ptr<Packet>> dequeuePair =
         m_rdmaEQ->DoRoundRobin(m_paused, state);
     if (state != -1024) { // has packet to send
+      // Statistics: increment has packet counter
+      m_hasPacketCount++;
+      // Statistics: increment has packet counter
+
       Ptr<Packet> p = dequeuePair.second;
       if (state == -1) { // high prio
         m_traceDequeue(p, 0);      
@@ -375,6 +386,10 @@ void QbbNetDevice::DequeueAndTransmit(void) {
       }
       m_rdmaUpdateTxBytes(m_ifIndex, p->GetSize());
     } else { // no packet to send
+      // Statistics: increment no packet counter  
+      m_noPacketCount++;
+      // Statistics: increment no packet counter
+
       NS_LOG_INFO("PAUSE prohibits send at node " << m_node->GetId());
       Time t = Simulator::GetMaximumSimulationTime();
       uint32_t fcount = m_rdmaEQ->m_qpGrp->m_qps.size();
@@ -528,6 +543,10 @@ void QbbNetDevice::SwitchDequeueAndTransmit(void) {
   Ptr<Packet> p;
   p = m_queue->DequeueRR(m_paused); // this is round-robin
   if (p != 0) {
+    // Statistics: increment has packet counter
+    m_hasPacketCount++;
+    // Statistics: increment has packet counter
+
     m_snifferTrace(p);
     m_promiscSnifferTrace(p);
     Ipv4Header h;
@@ -555,6 +574,10 @@ void QbbNetDevice::SwitchDequeueAndTransmit(void) {
     TransmitStart(p);
     return;
   } else { // No queue can deliver any packet
+    // statistics: increment no packet counter
+    m_noPacketCount++;
+    // statistics: increment no packet counter
+
     NS_LOG_INFO("PAUSE prohibits send at node " << m_node->GetId());
     if (m_node->GetNodeType() == 0 &&
         m_qcnEnabled) { // nothing to send, possibly due to qcn flow control, if
@@ -881,4 +904,38 @@ void QbbNetDevice::UpdateNextAvail(Time t) {
         Simulator::Schedule(delta, &QbbNetDevice::DequeueAndTransmit, this);
   }
 }
+
+// Statistics methods implementation
+void QbbNetDevice::GetDequeueStats(uint64_t& hasPacketCount, uint64_t& noPacketCount, double& hasPacketRatio) const {
+  hasPacketCount = m_hasPacketCount;
+  noPacketCount = m_noPacketCount;
+  uint64_t totalCalls = m_hasPacketCount + m_noPacketCount;
+  if (totalCalls > 0) {
+    hasPacketRatio = (double)m_hasPacketCount / totalCalls;
+  } else {
+    hasPacketRatio = 0.0;
+  }
+}
+
+void QbbNetDevice::ResetDequeueStats() {
+  m_hasPacketCount = 0;
+  m_noPacketCount = 0;
+}
+
+void QbbNetDevice::PrintDequeueStats() const {
+  uint64_t totalCalls = m_hasPacketCount + m_noPacketCount;
+  if (totalCalls > 0) {
+    double hasPacketRatio = (double)m_hasPacketCount / totalCalls;
+    double noPacketRatio = (double)m_noPacketCount / totalCalls;
+    NS_LOG_UNCOND("=== DEQUEUE STATISTICS ====");
+    NS_LOG_UNCOND("Node " << m_node->GetId() << " DequeueAndTransmit Stats: "
+               << "Total=" << totalCalls 
+               << ", HasPacket=" << m_hasPacketCount << " (" << std::fixed << std::setprecision(2) << hasPacketRatio * 100 << "%)"
+               << ", NoPacket=" << m_noPacketCount << " (" << std::fixed << std::setprecision(2) << noPacketRatio * 100 << "%)");
+    NS_LOG_UNCOND("==========================");
+  } else {
+    NS_LOG_UNCOND("Node " << m_node->GetId() << " had no DequeueAndTransmit calls.");
+  }
+}
+
 } // namespace ns3

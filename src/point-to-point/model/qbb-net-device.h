@@ -231,6 +231,10 @@ class QbbNetDevice : public PointToPointNetDevice {
 
   std::vector<ECNAccount>* m_ecn_source;
 
+  // Statistics for DequeueAndTransmit branch execution
+  uint64_t m_hasPacketCount;    // Counter for "has packet to send" branch
+  uint64_t m_noPacketCount;     // Counter for "no packet to send" branch
+
  public:
   Ptr<RdmaEgressQueue> m_rdmaEQ;
   void RdmaEnqueueHighPrioQ(Ptr<Packet> p);
@@ -252,6 +256,11 @@ class QbbNetDevice : public PointToPointNetDevice {
   Ptr<RdmaEgressQueue> GetRdmaQueue();
   void TakeDown(); // take down this device
   void UpdateNextAvail(Time t);
+  
+  // Statistics methods
+  void GetDequeueStats(uint64_t& hasPacketCount, uint64_t& noPacketCount, double& hasPacketRatio) const;
+  void ResetDequeueStats();
+  void PrintDequeueStats() const;
 
   TracedCallback<Ptr<const Packet>, Ptr<RdmaQueuePair>>
       m_traceQpDequeue; // the trace for printing dequeue
