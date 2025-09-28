@@ -1,6 +1,6 @@
 # INPUT FILE PATH
-TOPOLOGY_FILE ./examples/allstack/topos/topo3
-ALGO_FILE ./examples/allstack/algos/allgather_ring.xml
+TOPOLOGY_FILE ./examples/allstack/topos/nodeX3
+ALGO_FILE ./examples/allstack/algos/test_x3_gpu.xml
 
 # OUTPUT FILE PATH
 FCT_OUTPUT_FILE ./examples/allstack/outputs/fct.txt
@@ -23,6 +23,7 @@ TRACE_FILE ./examples/allstack/trace_config.txt
 TRACE_OUTPUT_FILE ./examples/allstack/outputs/mix.tr
 
 # VAR SETTINGS
+SIMULATOR_START_TIME 0.00
 SIMULATOR_STOP_TIME 40000000000000.00
 ERROR_RATE_PER_LINK 0.0000
 
@@ -43,6 +44,9 @@ PMAX_MAP 6 25000000000 0.2 50000000000 0.2 100000000000 0.2 200000000000 0.8 400
 BUFFER_SIZE 32
 
 # NS3 SETTINGS
+# set chunkSize to control message size in ThreadBlock
+ns3::ThreadBlock::chunkSize 1024000
+
 ns3::QbbNetDevice::QcnEnabled true
 ns3::QbbNetDevice::DynamicThreshold true
 
