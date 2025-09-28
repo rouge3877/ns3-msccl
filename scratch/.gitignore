@@ -7,6 +7,5 @@
 !CMakeLists.txt
 !common.h
 !config.h
-!NormalNetwork.cc
 !QpReuseNetwork.cc
 !OpSendRecv.cc
