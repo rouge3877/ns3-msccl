@@ -98,6 +98,10 @@ TypeId RdmaClient::GetTypeId(void) {
                         BooleanValue(false),
                         MakeBooleanAccessor(&RdmaClient::SetOperationsRun,
                                           &RdmaClient::GetOperationsRun),
+                        MakeBooleanChecker())
+          .AddAttribute("DumbClient", "If true, do not create QP",
+                        BooleanValue(false),
+                        MakeBooleanAccessor(&RdmaClient::m_dumbClient),
                         MakeBooleanChecker());
   return tid;
 }
@@ -137,6 +141,12 @@ void RdmaClient::PushMessagetoQp(uint64_t size) {
 void RdmaClient::FinishQp() {
   Ptr<Node> node = GetNode();
   Ptr<RdmaDriver> rdma = node->GetObject<RdmaDriver>();
+  if ( m_qp == nullptr ) {
+    NS_ASSERT_MSG(m_dumbClient == true, "m_qp is null but not in dumb mode");
+    NS_LOG_INFO("RdmaClient::FinishQp() called in dumb mode, no qp need finish.");
+    return;
+  }
+  NS_LOG_INFO("RdmaClient::FinishQp() called, finishing QP." << m_qp->GetHash());
   rdma->FinishQueuePair(m_qp);
 }
 
@@ -156,21 +166,29 @@ void RdmaClient::DoDispose(void) {
   Application::DoDispose();
 }
 
-void RdmaClient::StartApplication(void) {
+void RdmaClient::Setup(void) {
   NS_LOG_FUNCTION_NOARGS();
-  
-  // Validate attribute constraints
-  if (m_passiveDestroy && m_operationsRun) {
-    NS_FATAL_ERROR("Invalid configuration: PassiveDestroy and OperationsRun cannot both be true");
+  if (m_setupDone) {
+    NS_LOG_WARN("RdmaClient::Setup() has already been called. Ignoring subsequent call.");
+    return;
   }
-  
-  // get RDMA driver and add up queue pair
+  m_setupDone = true;
+
   Ptr<Node> node = GetNode();
   Ptr<RdmaDriver> rdma = node->GetObject<RdmaDriver>();
   // setup NVLS
   if(nvls_enable) rdma->EnbaleNVLS();
   else rdma->DisableNVLS();
-  m_qp = rdma->AddQueuePair(src, dest, tag, m_size, m_pg, m_sip, m_dip, m_sport,
+
+  uint64_t newQp_size = m_size;
+  NS_ASSERT_MSG(newQp_size == 0, "RdmaClient should set size via PushMessagetoQp()");
+
+  if (m_sport == m_dport && m_sip == m_dip) {
+    NS_LOG_INFO("Client with same source and destination address/port. Run in dumb mode.");
+    m_dumbClient = true;
+  }
+
+  m_qp = m_dumbClient ? nullptr : rdma->AddQueuePair(src, dest, tag, newQp_size, m_pg, m_sip, m_dip, m_sport,
                      m_dport, m_win, m_baseRtt,
                      MakeCallback(&RdmaClient::Finish, this),
                      MakeCallback(&RdmaClient::Sent, this));
@@ -237,7 +255,7 @@ void RdmaClient::DoSend(uint64_t size) {
   else
     NS_LOG_INFO("Executing SEND operation with size " << size);
 
-    this->PushMessagetoQp(size);
+  this->PushMessagetoQp(size);
 }
 
 void RdmaClient::DoRecv() {
@@ -279,7 +297,7 @@ void RdmaClient::HandleTxComplete() {
     NS_LOG_INFO("SEND operation completed in non-operations mode.");
     if (!m_notifyTxComplete.IsNull())
       m_notifyTxComplete();
-    }
+  }
 }
 
 void RdmaClient::HandleRxComplete() {
@@ -302,7 +320,7 @@ void RdmaClient::HandleRxComplete() {
     NS_LOG_INFO("RECV operation completed in non-operations mode.");
     NS_ASSERT_MSG(!m_notifyRxComplete.IsNull(), "RxComplete callback is null in non-operations mode");
     m_notifyRxComplete();
-    }
+  }
 }
 
 // Validation methods for attribute constraints

@@ -64,10 +64,12 @@ RdmaClientHelper::Install (NodeContainer c)
   for (NodeContainer::Iterator i = c.Begin (); i != c.End (); ++i)
     {
       Ptr<Node> node = *i;
+      // print the configuration of this client
       Ptr<RdmaClient> client = m_factory.Create<RdmaClient> ();
       client->SetFn(msg_handler, fun_arg);
       node->AddApplication (client);
       apps.Add (client);
+      client->Setup();
     }
   return apps;
 }

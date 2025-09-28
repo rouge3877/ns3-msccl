@@ -119,6 +119,10 @@ public:
 
   void SetAboveLayerCallback(Callback<void> tx, Callback<void> rx);
 
+  std::pair<Ipv4Address, uint16_t> GetRemote() const { return std::make_pair(m_dip, m_dport); }
+  std::pair<Ipv4Address, uint16_t>  GetLocal() const { return std::make_pair(m_sip, m_sport); }
+  void Setup();
+
 protected:
   virtual void DoDispose (void);
 
@@ -142,6 +146,9 @@ private:
   uint32_t nvls_enable;
   bool m_passiveDestroy = false; // if true, qp will destroy itself when no more message to send
   bool m_operationsRun = false; // if true, run operations one by one
+
+  bool m_dumbClient; // if true, do not creat qp
+  bool m_setupDone = false;
 };
 
 } // namespace ns3
