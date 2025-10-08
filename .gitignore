@@ -84,3 +84,5 @@ vcpkg/
 perf.data*
 out.perf
 out.folded
+
+sim-results/
