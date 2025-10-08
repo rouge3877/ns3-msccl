@@ -26,6 +26,10 @@ class ThreadBlockStep : public Object
             REDUCE,     //!< compute
             SEND,       //!< send to peer
             RECV,       //!< receive from peer
+            RECV_REDUCE_COPY,       //!< receive and reduce and copy to peer
+            RECV_REDUCE_COPY_SEND,  //!< receive and reduce and copy to peer and send to next
+            RECV_REDUCE_SEND,       //!< receive and reduce and send to next
+            RECV_COPY_SEND,         //!< receive and copy to peer and send to next
             LAST_TYPE   //!< Used only in debug messages
         };
         uint32_t GetS() const;

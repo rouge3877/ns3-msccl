@@ -10,6 +10,11 @@
 #include "ns3/mtp-interface.h"
 #endif
 
+#define REDUCE_TIME 0.000001        // 1us
+#define SEND_TIME   0.000001        // 1us
+#define COPY_TIME   0.0000000001    // 1ns
+#define RECV_TIME   0.0000000001    // 1ns
+
 namespace ns3
 {
 
@@ -59,6 +64,10 @@ class ThreadBlock : public Application
         void DoReduce();
         void DoSend(uint32_t chunks);
         void DoRecv();                
+        void DoRecvReduceCopy();
+        void DoRecvReduceCopySend(uint32_t chunks);
+        void DoRecvReduceSend(uint32_t chunks);
+        void DoRecvCopySend(uint32_t chunks);
         void CompleteStep();
 
         Ptr<GPUNode> m_gpuNode;

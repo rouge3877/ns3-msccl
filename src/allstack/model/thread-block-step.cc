@@ -33,7 +33,11 @@ ThreadBlockStep::GetTypeId()
                     ThreadBlockStep::NOP, "nop",
                     ThreadBlockStep::REDUCE, "re", 
                     ThreadBlockStep::SEND, "s", 
-                    ThreadBlockStep::RECV, "r"
+                    ThreadBlockStep::RECV, "r",
+                    ThreadBlockStep::RECV_REDUCE_COPY, "rrc",
+                    ThreadBlockStep::RECV_REDUCE_COPY_SEND, "rrcs",
+                    ThreadBlockStep::RECV_REDUCE_SEND, "rrs",
+                    ThreadBlockStep::RECV_COPY_SEND, "rcs"
                 ))
             .AddAttribute(
                 "cnt",

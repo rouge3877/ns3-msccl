@@ -223,6 +223,28 @@ ThreadBlock::DoStep()
         case ThreadBlockStep::RECV:
             DoRecv();
             break;
+        case ThreadBlockStep::RECV_REDUCE_COPY:
+            // DoRecv();
+            // DoReduce();
+            DoRecvReduceCopy();
+            break;
+        case ThreadBlockStep::RECV_REDUCE_COPY_SEND:
+            // DoRecv();
+            // DoReduce();
+            // DoSend(step->GetCount());
+            DoRecvReduceCopySend(step->GetCount());
+            break;
+        case ThreadBlockStep::RECV_REDUCE_SEND:
+            // DoRecv();
+            // DoReduce();
+            // DoSend(step->GetCount());
+            DoRecvReduceSend(step->GetCount());
+            break;
+        case ThreadBlockStep::RECV_COPY_SEND:
+            // DoRecv();
+            // DoSend(step->GetCount());
+            DoRecvCopySend(step->GetCount());
+            break;
         default:
             break;
     }
@@ -275,7 +297,7 @@ void
 ThreadBlock::DoReduce()
 {
     NS_LOG_FUNCTION(this);
-    Simulator::Schedule(Seconds(0.001), &ThreadBlock::CompleteStep, this);
+    Simulator::Schedule(Seconds(REDUCE_TIME), &ThreadBlock::CompleteStep, this);
 }
 
 void
@@ -290,7 +312,7 @@ ThreadBlock::DoSend(uint32_t chunks)
     cs.ExitSection();
 #endif
 
-    Simulator::Schedule(Seconds(0), &ThreadBlock::CompleteStep, this);
+    Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
     uint64_t size = chunks * m_chunkSize;
     this->GetRdmaClient()->DoSend(size);
 }
@@ -325,6 +347,130 @@ ThreadBlock::DoRecv()
         this->GetRdmaClient()->DoRecv();
     }
 }
+
+void
+ThreadBlock::DoRecvReduceCopy()
+{
+    NS_LOG_FUNCTION(this);
+    
+#ifdef NS3_MTP
+    MtpInterface::explicitCriticalSection cs;
+#endif
+    if (m_recv_message_num > 0)
+    {
+        // 如果有可用的消息数量，直接完成并减一
+        m_recv_message_num--;
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
+    }
+    else
+    {
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        // 否则等待，通过 RdmaClient 接收消息
+        this->GetRdmaClient()->DoRecv();
+    }
+}
+
+void
+ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
+{
+    NS_LOG_FUNCTION(this);
+
+#ifdef NS3_MTP
+    MtpInterface::explicitCriticalSection cs;
+#endif
+    if (m_recv_message_num > 0)
+    {
+        // 如果有可用的消息数量，直接完成并减一
+        m_recv_message_num--;
+
+        // 这里假设 Reduce 和 Copy 是同时进行的
+        m_total_send_message_num += 1;
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+
+        Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
+        uint64_t size = chunks * m_chunkSize;
+        this->GetRdmaClient()->DoSend(size);
+    }
+    else
+    {
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        // 否则等待，通过 RdmaClient 接收消息
+        this->GetRdmaClient()->DoRecv();
+    }
+}
+
+void
+ThreadBlock::DoRecvReduceSend(uint32_t chunks)
+{
+    NS_LOG_FUNCTION(this);
+
+#ifdef NS3_MTP
+    MtpInterface::explicitCriticalSection cs;
+#endif
+    if (m_recv_message_num > 0)
+    {
+        // 如果有可用的消息数量，直接完成并减一
+        m_recv_message_num--;
+
+        m_total_send_message_num += 1;
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+
+        Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
+        uint64_t size = chunks * m_chunkSize;
+        this->GetRdmaClient()->DoSend(size);
+    }
+    else
+    {
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        // 否则等待，通过 RdmaClient 接收消息
+        this->GetRdmaClient()->DoRecv();
+    }
+}
+
+void
+ThreadBlock::DoRecvCopySend(uint32_t chunks)
+{
+    NS_LOG_FUNCTION(this);
+
+#ifdef NS3_MTP
+    MtpInterface::explicitCriticalSection cs;
+#endif
+    if (m_recv_message_num > 0)
+    {
+        // 如果有可用的消息数量，直接完成并减一
+        m_recv_message_num--;
+
+        m_total_send_message_num += 1;
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        Simulator::Schedule(Seconds(COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
+        uint64_t size = chunks * m_chunkSize;
+        this->GetRdmaClient()->DoSend(size);
+    }
+    else
+    {
+#ifdef NS3_MTP
+        cs.ExitSection();
+#endif
+        // 否则等待，通过 RdmaClient 接收消息
+        this->GetRdmaClient()->DoRecv();
+    }
+}
+
 
 // get the rdma client bound to this thread block
 Ptr<RdmaClient>
@@ -373,19 +519,50 @@ ThreadBlock::RecvMessageDone()
     if (m_currentStep != m_steps.end())
     {
         Ptr<ThreadBlockStep> step = *m_currentStep;
-        if (step->GetType() == ThreadBlockStep::RECV && m_recv_message_num > 0)
-        {
-            // 如果当前步骤是接收且有可用消息，完成步骤
-            m_recv_message_num--;
 
-#ifdef NS3_MTP
-            cs.ExitSection();
-#endif
-            Simulator::Schedule(Seconds(0), &ThreadBlock::CompleteStep, this);
-            return;
+        if (m_recv_message_num > 0) {
+            switch(step->GetType())
+            {
+                case ThreadBlockStep::RECV:
+                    m_recv_message_num--;
+                    Simulator::Schedule(Seconds(0), &ThreadBlock::CompleteStep, this);
+                    break;
+                case ThreadBlockStep::RECV_REDUCE_COPY:
+                    m_recv_message_num--;
+                    Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
+                    break;
+                case ThreadBlockStep::RECV_REDUCE_COPY_SEND:
+                {
+                    m_recv_message_num--;
+                    Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
+                    m_total_send_message_num += 1;
+                    uint64_t size = step->GetCount() * m_chunkSize;
+                    this->GetRdmaClient()->DoSend(size);
+                    break;
+                }
+                case ThreadBlockStep::RECV_REDUCE_SEND:
+                {
+                    m_recv_message_num--;
+                    Simulator::Schedule(Seconds(REDUCE_TIME), &ThreadBlock::CompleteStep, this);
+                    m_total_send_message_num += 1;
+                    uint64_t size = step->GetCount() * m_chunkSize;
+                    this->GetRdmaClient()->DoSend(size);
+                    break;
+                }
+                case ThreadBlockStep::RECV_COPY_SEND:
+                {
+                    m_recv_message_num--;
+                    Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
+                    m_total_send_message_num += 1;
+                    uint64_t size = step->GetCount() * m_chunkSize;
+                    this->GetRdmaClient()->DoSend(size);
+                    break;
+                }
+                default:
+                    break;
+            }
         }
     }
-    
 #ifdef NS3_MTP
     cs.ExitSection();
 #endif
