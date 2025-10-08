@@ -65,6 +65,7 @@ extern std::unordered_map<std::string, std::unique_ptr<ConfigBase>> config_map_n
  ***********************************************/
 double simulator_start_time = 2.0;
 double simulator_stop_time = 3.01;
+double collective_start_time = simulator_start_time;
 std::string data_rate, link_delay, topology_file, algo_file, trace_file;
 tinyxml2::XMLDocument algo_xml_doc;
 std::string trace_output_file = "mix.tr";
@@ -102,6 +103,7 @@ void InitConfigMap()
      ***********************************************/
     config_map["SIMULATOR_START_TIME"] = std::make_unique<ConfigVar<double>>(simulator_start_time);
     config_map["SIMULATOR_STOP_TIME"] = std::make_unique<ConfigVar<double>>(simulator_stop_time);
+    config_map["COLLECTIVE_START_TIME"] = std::make_unique<ConfigVar<double>>(collective_start_time);
     config_map["DATA_RATE"] = std::make_unique<ConfigVar<std::string>>(data_rate);
     config_map["LINK_DELAY"] = std::make_unique<ConfigVar<std::string>>(link_delay);
     config_map["TOPOLOGY_FILE"] = std::make_unique<ConfigVar<std::string>>(topology_file);
@@ -1252,24 +1254,47 @@ void SetupNetwork(
         "Failed to open algo xml file: " << algo_file);
 
     tinyxml2::XMLElement *algo = algo_xml_doc.FirstChildElement("algo");
+    
+    // First pass: build a map of GPU rank -> XMLElement
+    std::unordered_map<uint32_t, tinyxml2::XMLElement*> rank_to_gpu_xml;
     auto gpu = algo->FirstChildElement("gpu");
+    while (gpu != nullptr)
+    {
+        uint32_t gpu_rank = gpu->IntAttribute("id");
+        rank_to_gpu_xml[gpu_rank] = gpu;
+        gpu = gpu->NextSiblingElement("gpu");
+    }
+    
+    // Second pass: assign ranks to GPU nodes and install applications only for matching ranks
     NodeContainer gpu_nodes{0};
+    uint32_t current_gpu_rank = 0;
     for (uint32_t i = 0; i < node_num; i++)
     {
         if (n.Get(i)->GetNodeType() == 0)
         {
             gpu_nodes = NodeContainer(gpu_nodes, n.Get(i));
-            NS_ASSERT_MSG(gpu != nullptr, "Not enough gpu config in algo xml file");
 
             auto gpu_node = DynamicCast<GPUNode>(n.Get(i));
-            gpu_node->SetRank(gpu->IntAttribute("id"));
-            rank2node_peer[gpu->IntAttribute("id")] = make_pair(n.Get(i), i);
+            gpu_node->SetRank(current_gpu_rank);
+            rank2node_peer[current_gpu_rank] = make_pair(n.Get(i), i);
+            
+            // Only install GPUThreadBlock if this rank has configuration in XML
+            if (rank_to_gpu_xml.find(current_gpu_rank) != rank_to_gpu_xml.end())
+            {
+                tinyxml2::XMLElement* gpu_xml = rank_to_gpu_xml[current_gpu_rank];
+                NS_LOG_INFO("Installing GPUThreadBlock for GPU rank " << current_gpu_rank << " on node " << i);
 
-            GPUThreadBlockHelper helper(gpu);
+                GPUThreadBlockHelper helper(gpu_xml);
             ApplicationContainer apps = helper.Install(DynamicCast<GPUNode>(n.Get(i)));
-            apps.Start(Seconds(simulator_start_time));
-
-            gpu = gpu->NextSiblingElement("gpu");
+                apps.Start(Seconds(collective_start_time));
+            }
+            else
+            {
+                NS_LOG_INFO("Skipping GPUThreadBlock installation for GPU rank " << current_gpu_rank 
+                           << " on node " << i << " (no matching configuration in XML)");
+            }
+            
+            current_gpu_rank++;
         }
     }
 
