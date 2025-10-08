@@ -3,22 +3,10 @@
 # ==============================================================================
 # A robust script to run the msccl simulation with different chunk sizes,
 # record the time taken, and generate a plot.
-#
-# Features:
-# - Robust error handling (exits on command failure).
-# - Secure temporary file management with automatic cleanup.
-# - Flexible configuration via command-line options.
-# - Clear progress reporting to stderr.
-# - Validates simulation output before recording.
-# - Handles single data point plotting gracefully inside Gnuplot.
 # ==============================================================================
 
-# Exit immediately if a command exits with a non-zero status.
 set -e
-# Treat unset variables as an error.
 set -u
-# The return value of a pipeline is the status of the last command to exit with a
-# non-zero status, or zero if no command exited with a non-zero status.
 set -o pipefail
 
 # --- Global Constants ---
@@ -126,7 +114,7 @@ generate_plot() {
     fi
     
     # The logic is now entirely within the Gnuplot script.
-    gnuplot -e "input_files='$results_file'" -e "output_file='$output_plot_path'" -p $GNUPLOT_SCRIPT
+    gnuplot -e "input_files='$results_file'" -e "output_file='$output_plot_path'" -e "title='Time of MSCCL in Simulation'" -p $GNUPLOT_SCRIPT
 
     echo "Plot saved to $output_plot_path" >&2
 }

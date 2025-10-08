@@ -107,8 +107,8 @@ generate_plot() {
         echo "Warning: Gnuplot not found, skipping plot." >&2
         return
     fi
-    
-    gnuplot -e "input_files='$results_file'" -e "output_file='$output_plot_path'" -p $GNUPLOT_SCRIPT
+
+    gnuplot -e "input_files='$results_file'" -e "output_file='$output_plot_path'" -e "title='Execution Time'" -p $GNUPLOT_SCRIPT
     echo "Plot saved to $output_plot_path" >&2
 }
 

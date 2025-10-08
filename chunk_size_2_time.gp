@@ -1,5 +1,13 @@
 # multi_file_plot.gp
 
+###################################
+# Usage:
+# gnuplot -e "input_files='sim-results/allreduce_hierarchical_54_1_results.txt sim-results/allreduce_ring_54_1_results.txt'" \
+#         -e "output_file='sim-results/performance_comparison.pdf'"
+#         -e "title='Performance Comparison of AllReduce Algorithms'" \
+#          chunk_size_2_time.gp
+###################################
+
 # --- TERMINAL AND OUTPUT ---
 # 定义输出文件格式和路径
 # output_file 变量需要从外部传入
@@ -28,7 +36,7 @@ get_prefix(s) = ( \
 )
 
 # --- TITLE ---
-set title "MSCCL Performance vs. Chunk Size" font "Times-New-Roman,16"
+set title title font "Times-New-Roman,16"
 
 # --- MARGINS ---
 set lmargin at screen 0.15
@@ -38,15 +46,17 @@ set tmargin at screen 0.90
 
 # --- AXES AND GRID ---
 set xlabel "Chunk Size (KB)" font "Times-New-Roman,14"
-set ylabel "Time Taken (ns)" font "Times-New-Roman,14"
+set ylabel "Time Taken (s)" font "Times-New-Roman,14"
 set border 3 front linetype -1 linewidth 1.0
 set tics out nomirror
 set grid back linetype 0 linecolor "gray80"
 
 # --- AXIS SCALES & TICS ---
+set mxtics # Re-enable minor tics for linear scale
+unset mytics
 set logscale x 2
-unset mxtics
-set mytics 2
+set logscale y 2
+set mytics
 
 # --- DYNAMIC PLOT HANDLING (REMOVED) ---
 # 原始脚本中用于处理单个数据点的 'stats' 和 'if' 逻辑已被移除。
