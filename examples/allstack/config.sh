@@ -1,6 +1,6 @@
 # INPUT FILE PATH
-TOPOLOGY_FILE ./examples/allstack/topos/nodeX3
-ALGO_FILE ./examples/allstack/algos/test_x3_gpu.xml
+TOPOLOGY_FILE ./examples/allstack/topos/fattree-k6
+ALGO_FILE ./examples/allstack/algos/allreduce_hierarchical_54_1.xml
 
 # OUTPUT FILE PATH
 FCT_OUTPUT_FILE ./examples/allstack/outputs/fct.txt
