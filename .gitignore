@@ -86,3 +86,4 @@ out.perf
 out.folded
 
 sim-results/
+sim-time/
