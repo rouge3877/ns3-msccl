@@ -33,6 +33,7 @@ extern tinyxml2::XMLDocument algo_xml_doc;
 extern std::unordered_map<uint32_t, unordered_map<uint32_t, uint16_t>> portNumber;
 extern double simulator_start_time;
 extern double simulator_stop_time;
+extern double collective_start_time;
 
 
 void my_qp_finish(FILE *fout, Ptr<RdmaQueuePair> q)
@@ -142,7 +143,8 @@ int main(int argc, char *argv[])
             Ptr<GPUNode> gpu = DynamicCast<GPUNode>(n.Get(i));
             if (gpu->m_end_time > Seconds(0))
             {
-                std::cout << "GPU rank = " << gpu->GetRank() << " finished, time = " << (gpu->m_end_time.GetSeconds()) << " ns" << std::endl;
+                std::cout << "GPU rank = " << gpu->GetRank() << " finished, time = "
+                << (gpu->m_end_time.GetSeconds() - collective_start_time) << " s" << std::endl;
             }
             else
             {
