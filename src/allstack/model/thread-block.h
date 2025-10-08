@@ -52,6 +52,8 @@ class ThreadBlock : public Application
         
         void CompleteThreadBlock();
 
+        ns3::Time m_end_time = Seconds(0);   //!< time when this thread block finished
+
     protected:
         void DoDispose() override;
 

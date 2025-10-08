@@ -3,6 +3,7 @@
 
 #include "ns3/node.h"
 #include "ns3/thread-block.h"
+#include "ns3/nstime.h"
 
 namespace ns3
 {
@@ -27,6 +28,8 @@ class GPUNode : public Node
         uint32_t GetNThreadBlocks() const;
 
         int FinishedTBCallback();
+
+        ns3::Time m_end_time = Seconds(0);   //!< time when this GPU node finished all TBs
 
     protected:
         void DoDispose() override;

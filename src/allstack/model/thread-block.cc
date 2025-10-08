@@ -274,6 +274,8 @@ ThreadBlock::CompleteStep()
     else
     {
         NS_LOG_INFO("GPU " << m_node->GetId() << " ThreadBlock " << m_id << " All Steps Complete. ( rank = " << DynamicCast<GPUNode>(m_node)->GetRank() << " )");
+        // record end time
+        m_end_time = Simulator::Now();
         CompleteThreadBlock();
     }
 }

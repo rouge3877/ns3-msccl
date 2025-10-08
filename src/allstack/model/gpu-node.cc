@@ -87,6 +87,11 @@ GPUNode::FinishedTBCallback()
             Ptr<ThreadBlock> tb = *i;
             Ptr<RdmaClient> rdmaClient = tb->GetRdmaClient();
             rdmaClient->FinishQp();
+
+            if (m_end_time < tb->m_end_time)
+            {
+                m_end_time = tb->m_end_time;
+            }
         }
         return 1;
     }

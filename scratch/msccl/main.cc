@@ -134,5 +134,22 @@ int main(int argc, char *argv[])
     Simulator::Stop(Seconds(simulator_stop_time));
     Simulator::Destroy();
 
+    for (uint32_t i = 0; i < n.GetN(); i++)
+    {
+        if (n.Get(i)->GetNodeType() == 0)
+        {
+            // GPU node
+            Ptr<GPUNode> gpu = DynamicCast<GPUNode>(n.Get(i));
+            if (gpu->m_end_time > Seconds(0))
+            {
+                std::cout << "GPU rank = " << gpu->GetRank() << " finished, time = " << (gpu->m_end_time.GetSeconds()) << " ns" << std::endl;
+            }
+            else
+            {
+                // std::cout << "GPU Node " << gpu->GetId() << " (rank " << gpu->GetRank() << ") did not finish all TBs\n";
+            }
+        }
+    }
+
     return 0;
 }
