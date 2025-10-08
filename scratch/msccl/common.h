@@ -817,7 +817,7 @@ bool ReadConf(int argc, char *argv[])
             }
             fflush(stdout);
         }
-        std::cout << "read config done!" << std::endl;
+        NS_LOG_INFO("read config done!");
         conf.close();
         /*******************
          * set special filename

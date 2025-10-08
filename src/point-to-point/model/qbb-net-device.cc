@@ -927,14 +927,14 @@ void QbbNetDevice::PrintDequeueStats() const {
   if (totalCalls > 0) {
     double hasPacketRatio = (double)m_hasPacketCount / totalCalls;
     double noPacketRatio = (double)m_noPacketCount / totalCalls;
-    NS_LOG_UNCOND("=== DEQUEUE STATISTICS ====");
-    NS_LOG_UNCOND("Node " << m_node->GetId() << " DequeueAndTransmit Stats: "
+    NS_LOG_INFO("=== DEQUEUE STATISTICS ====");
+    NS_LOG_INFO("Node " << m_node->GetId() << " DequeueAndTransmit Stats: "
                << "Total=" << totalCalls 
                << ", HasPacket=" << m_hasPacketCount << " (" << std::fixed << std::setprecision(2) << hasPacketRatio * 100 << "%)"
                << ", NoPacket=" << m_noPacketCount << " (" << std::fixed << std::setprecision(2) << noPacketRatio * 100 << "%)");
-    NS_LOG_UNCOND("==========================");
+    NS_LOG_INFO("==========================");
   } else {
-    NS_LOG_UNCOND("Node " << m_node->GetId() << " had no DequeueAndTransmit calls.");
+    NS_LOG_INFO("Node " << m_node->GetId() << " had no DequeueAndTransmit calls.");
   }
 }
 

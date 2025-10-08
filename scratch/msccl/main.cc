@@ -114,7 +114,8 @@ int main(int argc, char *argv[])
     ns3::MpiInterface::Enable(&argc, &argv);
 #endif
 
-    LogComponentEnable("MSCCL", LOG_LEVEL_INFO);
+    // LogComponentEnable("MSCCL", LOG_LEVEL_INFO);
+    LogComponentEnable("MSCCL", LOG_LEVEL_ERROR);
 
     CommandLine cmd;
     cmd.Parse(argc, argv);
