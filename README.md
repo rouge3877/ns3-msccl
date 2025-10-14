@@ -76,6 +76,21 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
         - 另一次由 `RdmaHw::QpCompleteMessage()` 更新。
     - **A**：通过引入一个标志位（`msg.m_setupd`）来确保序列号在每个消息的生命周期中只被设置一次，问题已解决。
 
+
+- [ ] `RdmaClient` 在 `ThreadBlock` 之前初始化
+    - **Q**：在 `ThreadBlock` 初始化之前，`RdmaClient` 已经被创建和设置好
+    - **Q**：以确保 `ThreadBlock` 能够在其生命周期内访问和使用 `RdmaClient` 实例, 进一步的，当存在多个 CC 要执行时, `RdmaClient` 实例可以被复用
+- [ ] Demystify Why a dumb RDMAClient is needed for simulation
+- [ ] Message ID management for recv, to match the recv buffer (srcbuf, srcoff, cnt, dstbuf, dstoff)
+    - `ThreadBlock::DoRecv`
+- [ ] Send completion callback to THREADBLOCK, donot use polling
+    - `ThreadBlock::CompleteThreadBlock`
+- [ ] Send Time calculation
+    - `ThreadBlock::DoSend`
+
+
+- [ ] RDMA over Ethernet for Distributed Training at Meta Scale, background
+
 ## Performance Issues
 
 - [ ] `flow` with different start timestamps (`QpReuseNetwork.cc`)
