@@ -1249,11 +1249,14 @@ void SetupNetwork(
     // Algorithm configuration
     /////////////////////////////////////////////////////
 
+    // avoid <optimized out> in -O3
+    auto xml_load_result = algo_xml_doc.LoadFile(algo_file.c_str());
     NS_ASSERT_MSG(
-        algo_xml_doc.LoadFile(algo_file.c_str()) == tinyxml2::XML_SUCCESS,
+        xml_load_result == tinyxml2::XML_SUCCESS,
         "Failed to open algo xml file: " << algo_file);
 
     tinyxml2::XMLElement *algo = algo_xml_doc.FirstChildElement("algo");
+    NS_ASSERT_MSG(algo != nullptr, "No <algo> element found in algo xml file");
     
     // First pass: build a map of GPU rank -> XMLElement
     std::unordered_map<uint32_t, tinyxml2::XMLElement*> rank_to_gpu_xml;
