@@ -741,28 +741,58 @@ void RdmaHw::QpComplete(Ptr<RdmaQueuePair> qp) {
 }
 
 void RdmaHw::QpCompleteMessage(Ptr<RdmaQueuePair> qp) {
-#ifdef NS3_MTP
-  MtpInterface::explicitCriticalSection cs;
-#endif
   // qp->m_messages.front().m_notifyAppFinish();
   // callback
   NS_ABORT_MSG_IF(qp->m_messages.empty(), "No message in qp, but QpCompleteMessage is called");
-  RdmaQueuePair::RdmaMessage msg = qp->m_messages.front();
+  
+  RdmaQueuePair::RdmaMessage msg;
+  uint32_t nic_idx;
+  bool hasMoreMessages = false;
+  
+#ifdef NS3_MTP
+  {
+    // Critical section: update QP internal state only
+    // We must NOT call user callbacks while holding the lock to avoid nested lock deadlock
+    MtpInterface::explicitCriticalSection cs;
+    
+    msg = qp->m_messages.front();
+    qp->FinishMessage();
+    
+    if(!qp->m_messages.empty()){
+      // Have more messages to send
+      hasMoreMessages = true;
+      if (qp->m_messages.front().m_setupd == false) {
+        qp->m_messages.front().m_setupd = true;
+        qp->m_messages.front().m_startSeq = qp->snd_nxt;
+      }
+      NS_LOG_DEBUG("qp->m_messages is not empty after finishing a message, the next message starts at seq " << qp->m_messages.front().m_startSeq << ", size is: " << qp->m_messages.front().m_size);
+      nic_idx = GetNicIdxOfQp(qp);
+    }
+    
+    cs.ExitSection();
+  }
+  // Lock is now released, safe to call user callback
+  m_messageCompleteCallback(qp, msg.m_size);
+  
+  if(hasMoreMessages){
+    m_nic[nic_idx].dev->TriggerTransmit();
+  }
+#else
+  // Single-threaded version: no locking needed
+  msg = qp->m_messages.front();
   qp->FinishMessage();
   m_messageCompleteCallback(qp, msg.m_size);
+  
   if(!qp->m_messages.empty()){
     // Have more messages to send
-    // std::cout<<"at "<<Simulator::Now().GetTimeStep()<<"ns, qp src:"<<qp->m_src<<" dst:"<<qp->m_dest<<" port:"<<qp->sport<<" dport:"<<qp->dport<<" has more messages to send\n";
     if (qp->m_messages.front().m_setupd == false) {
       qp->m_messages.front().m_setupd = true;
       qp->m_messages.front().m_startSeq = qp->snd_nxt;
     }
     NS_LOG_DEBUG("qp->m_messages is not empty after finishing a message, the next message starts at seq " << qp->m_messages.front().m_startSeq << ", size is: " << qp->m_messages.front().m_size);
-    uint32_t nic_idx = GetNicIdxOfQp(qp);
+    nic_idx = GetNicIdxOfQp(qp);
     m_nic[nic_idx].dev->TriggerTransmit();
   }
-#ifdef NS3_MTP
-  cs.ExitSection();
 #endif
 }
 
