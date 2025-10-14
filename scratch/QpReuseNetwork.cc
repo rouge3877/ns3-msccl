@@ -44,14 +44,36 @@ inline std::string getHashKey(uint32_t src, uint32_t dst, uint32_t pg, uint32_t 
 
 Ptr<RdmaClient> getClient(uint32_t src, uint32_t dst, uint32_t pg, uint32_t dport) {
   std::string hashKey = getHashKey(src, dst, pg, dport);  
+  
+  // Check if we need to create new apps
+  bool needsCreation = false;
   #ifdef NS3_MTP
-  MtpInterface::explicitCriticalSection cs;
+  {
+    MtpInterface::explicitCriticalSection cs;
   #endif
-  if (apps[hashKey].GetN() == 0) {
-    // create apps
+    if (apps[hashKey].GetN() == 0) {
+      needsCreation = true;
+    }
+  #ifdef NS3_MTP
+    cs.ExitSection();
+  }
+  #endif
+  
+  // Create apps outside of critical section to avoid nested locks
+  if (needsCreation) {
+    ApplicationContainer newApps;
     for (int i = 0; i < MAX_QPS; i++) {
-      uint32_t port =
-          portNumber[flow_input.src][flow_input.dst]++; // get a new port number
+      uint32_t port;
+      #ifdef NS3_MTP
+      {
+        MtpInterface::explicitCriticalSection cs;
+      #endif
+        port = portNumber[flow_input.src][flow_input.dst]++; // get a new port number
+      #ifdef NS3_MTP
+        cs.ExitSection();
+      }
+      #endif
+      
       RdmaClientHelper clientHelper(
           pg,
           serverAddress[src],
@@ -68,16 +90,36 @@ Ptr<RdmaClient> getClient(uint32_t src, uint32_t dst, uint32_t pg, uint32_t dpor
           dst,
           false,
           false); // passive destroy, operations run
-      apps[hashKey].Add(clientHelper.Install(n.Get(src)));
+      newApps.Add(clientHelper.Install(n.Get(src)));
     //   std::cout<<Simulator::Now().GetTimeStep()<<" " <<hashKey<<" add a client at node "<<src<<endl;
     }
-    apps[hashKey].Start(Time(0));
+    
+    // Add to apps map in critical section
+    #ifdef NS3_MTP
+    {
+      MtpInterface::explicitCriticalSection cs;
+    #endif
+      if (apps[hashKey].GetN() == 0) { // Double-check after creating
+        apps[hashKey] = newApps;
+        apps[hashKey].Start(Time(0));
+      }
+    #ifdef NS3_MTP
+      cs.ExitSection();
+    }
+    #endif
   }
+  
   // choose a random qp
   int idx = std::rand() % MAX_QPS;
-  Ptr<RdmaClient> app = DynamicCast<RdmaClient>(apps[hashKey].Get(idx));
+  Ptr<RdmaClient> app;
   #ifdef NS3_MTP
-  cs.ExitSection();
+  {
+    MtpInterface::explicitCriticalSection cs;
+  #endif
+    app = DynamicCast<RdmaClient>(apps[hashKey].Get(idx));
+  #ifdef NS3_MTP
+    cs.ExitSection();
+  }
   #endif
   return app;
 }
@@ -136,17 +178,11 @@ void Finish(){
 
 void qp_finish_reuse(FILE* fout, Ptr<RdmaQueuePair> q) {
   uint32_t sid = ip_to_node_id(q->sip), did = ip_to_node_id(q->dip);
-  #ifdef NS3_MTP
-  MtpInterface::explicitCriticalSection cs;
-  #endif
   Ptr<Node> dstNode = n.Get(did);
   Ptr<RdmaDriver> rdma = dstNode->GetObject<RdmaDriver>();
   rdma->m_rdma->DeleteRxQp(q->sip.Get(), q->m_pg, q->sport);
   std::cout << "at "<< Simulator::Now().GetNanoSeconds()<<"ns, qp finish, src: " << sid << " did: " << did
             << " port: " << q->sport << std::endl;
-  #ifdef NS3_MTP
-  cs.ExitSection();
-  #endif
 }
 
 void send_finish_reuse(FILE* fout, Ptr<RdmaQueuePair> q) {
