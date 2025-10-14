@@ -73,13 +73,7 @@ int
 GPUNode::FinishedTBCallback()
 {
     NS_LOG_FUNCTION(this);
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     m_tb_complete_count -= 1;
-#ifdef NS3_MTP
-    cs.ExitSection();
-#endif
     if (m_tb_complete_count == 0)
     {
         for (auto i = m_threadblocks.begin(); i != m_threadblocks.end(); i++)

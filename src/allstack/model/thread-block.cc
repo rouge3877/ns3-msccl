@@ -305,14 +305,8 @@ ThreadBlock::DoReduce()
 void
 ThreadBlock::DoSend(uint32_t chunks)
 {
-    NS_LOG_FUNCTION(this);    
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
+    NS_LOG_FUNCTION(this);
     m_total_send_message_num += 1;
-#ifdef NS3_MTP
-    cs.ExitSection();
-#endif
 
     Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
     uint64_t size = chunks * m_chunkSize;
@@ -323,28 +317,14 @@ void
 ThreadBlock::DoRecv()
 {
     NS_LOG_FUNCTION(this);
-    
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
-    
     if (m_recv_message_num > 0)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-        
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
-        
         Simulator::Schedule(Seconds(0), &ThreadBlock::CompleteStep, this);
     }
     else
     {
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
-        
         // 否则等待，通过 RdmaClient 接收消息
         this->GetRdmaClient()->DoRecv();
     }
@@ -354,24 +334,14 @@ void
 ThreadBlock::DoRecvReduceCopy()
 {
     NS_LOG_FUNCTION(this);
-    
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     if (m_recv_message_num > 0)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
     }
     else
     {
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         // 否则等待，通过 RdmaClient 接收消息
         this->GetRdmaClient()->DoRecv();
     }
@@ -381,10 +351,6 @@ void
 ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
 {
     NS_LOG_FUNCTION(this);
-
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     if (m_recv_message_num > 0)
     {
         // 如果有可用的消息数量，直接完成并减一
@@ -392,9 +358,6 @@ ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
 
         // 这里假设 Reduce 和 Copy 是同时进行的
         m_total_send_message_num += 1;
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
 
         Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
@@ -402,9 +365,6 @@ ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
     }
     else
     {
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         // 否则等待，通过 RdmaClient 接收消息
         this->GetRdmaClient()->DoRecv();
     }
@@ -414,19 +374,11 @@ void
 ThreadBlock::DoRecvReduceSend(uint32_t chunks)
 {
     NS_LOG_FUNCTION(this);
-
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     if (m_recv_message_num > 0)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-
         m_total_send_message_num += 1;
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
 
         Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
@@ -434,9 +386,6 @@ ThreadBlock::DoRecvReduceSend(uint32_t chunks)
     }
     else
     {
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         // 否则等待，通过 RdmaClient 接收消息
         this->GetRdmaClient()->DoRecv();
     }
@@ -446,28 +395,17 @@ void
 ThreadBlock::DoRecvCopySend(uint32_t chunks)
 {
     NS_LOG_FUNCTION(this);
-
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     if (m_recv_message_num > 0)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-
         m_total_send_message_num += 1;
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         Simulator::Schedule(Seconds(COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
         this->GetRdmaClient()->DoSend(size);
     }
     else
     {
-#ifdef NS3_MTP
-        cs.ExitSection();
-#endif
         // 否则等待，通过 RdmaClient 接收消息
         this->GetRdmaClient()->DoRecv();
     }
@@ -510,11 +448,6 @@ void
 ThreadBlock::RecvMessageDone()
 {
     NS_LOG_FUNCTION(this);
-    
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
-    
     m_recv_message_num++;
     
     // 检查当前步骤是否是 RECV 且正在等待消息
@@ -565,25 +498,13 @@ ThreadBlock::RecvMessageDone()
             }
         }
     }
-#ifdef NS3_MTP
-    cs.ExitSection();
-#endif
 }
 
 void
 ThreadBlock::SendMessageDone()
 {
     NS_LOG_FUNCTION(this);
-
-
-#ifdef NS3_MTP
-    MtpInterface::explicitCriticalSection cs;
-#endif
     m_total_send_message_num -= 1;
-
-#ifdef NS3_MTP
-    cs.ExitSection();
-#endif
 }
 
 

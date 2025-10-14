@@ -6,10 +6,6 @@
 #include "ns3/application.h"
 #include "ns3/rdma-client.h"
 
-#ifdef NS3_MTP
-#include "ns3/mtp-interface.h"
-#endif
-
 #define REDUCE_TIME 0.000001        // 1us
 #define SEND_TIME   0.000001        // 1us
 #define COPY_TIME   0.0000000001    // 1ns
