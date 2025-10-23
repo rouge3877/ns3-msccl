@@ -17,7 +17,7 @@ readonly START_CHUNK_SIZE_KB=1
 
 # --- Defaults ---
 DEFAULT_CONFIG_FILE="examples/allstack/config.sh"
-DEFAULT_OUTPUT_PREFIX="execution_time"
+DEFAULT_OUTPUT_PREFIX="exec_time"
 DEFAULT_NS3_CMD="./ns3 run 'scratch/msccl/main'"
 
 # --- Functions ---

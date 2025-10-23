@@ -14,11 +14,11 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly MAX_UINT32_CHUNK_SIZE_KB=4194304
 readonly GNUPLOT_SCRIPT="chunk_size_2_time.gp"
 readonly RESULTS_DIR="sim-results"
-readonly START_CHUNK_SIZE_KB=8  # Starting chunk size in KB
+readonly START_CHUNK_SIZE_KB=1  # Starting chunk size in KB
 
 # --- Default Configuration ---
 DEFAULT_CONFIG_FILE="examples/allstack/config.sh"
-DEFAULT_OUTPUT_PREFIX="result"
+DEFAULT_OUTPUT_PREFIX="sim_time"
 DEFAULT_NS3_CMD="./ns3 run 'scratch/msccl/main'"
 
 # --- Function Definitions ---
@@ -77,7 +77,7 @@ run_simulation() {
 
     local -r ns3_run_cmd="$ns3_cmd_base -- $config_file"
 
-    echo "Chunk Size (KB),Time Taken (ns)" > "$TMP_RESULTS_FILE"
+    echo "Chunk Size (KB),Time Taken (s)" > "$TMP_RESULTS_FILE"
 
     for chunk_size in "${chunk_sizes[@]}"; do
         echo "--> Running simulation with chunk size: ${chunk_size} KB" >&2
