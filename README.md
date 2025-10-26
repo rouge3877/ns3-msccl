@@ -80,10 +80,10 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
 - [ ] `RdmaClient` 在 `ThreadBlock` 之前初始化
     - **Q**：在 `ThreadBlock` 初始化之前，`RdmaClient` 已经被创建和设置好
     - **Q**：以确保 `ThreadBlock` 能够在其生命周期内访问和使用 `RdmaClient` 实例, 进一步的，当存在多个 CC 要执行时, `RdmaClient` 实例可以被复用
-- [ ] Demystify Why a dumb RDMAClient is needed for simulation
+- [x] Demystify Why a dumb RDMAClient is needed for simulation
 - [ ] Message ID management for recv, to match the recv buffer (srcbuf, srcoff, cnt, dstbuf, dstoff)
     - `ThreadBlock::DoRecv`
-- [ ] Send completion callback to THREADBLOCK, donot use polling
+- [x] Send completion callback to THREADBLOCK, donot use polling
     - `ThreadBlock::CompleteThreadBlock`
 - [ ] Send Time calculation
     - `ThreadBlock::DoSend`

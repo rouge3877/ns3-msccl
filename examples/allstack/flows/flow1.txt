@@ -1,0 +1,3 @@
+2
+0 ./examples/allstack/algos/allreduce_hierarchical_8_1.xml -1 0
+1 ./examples/allstack/algos/allreduce_hierarchical_8_1.xml 0 1

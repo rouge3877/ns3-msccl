@@ -1,6 +1,8 @@
 # INPUT FILE PATH
-TOPOLOGY_FILE ./examples/allstack/topos/fattree-k6
-ALGO_FILE ./examples/allstack/algos/allreduce_hierarchical_54_1.xml
+TOPOLOGY_FILE ./examples/allstack/topos/star-n8X2
+ALGO_FILE ./examples/allstack/algos/allreduce_hierarchical_8_1.xml
+COMM_DOMAIN_FILE ./examples/allstack/comm.txt
+MPI_FLOW_FILE ./examples/allstack/flows/flow1.txt
 
 # OUTPUT FILE PATH
 FCT_OUTPUT_FILE ./examples/allstack/outputs/fct.txt

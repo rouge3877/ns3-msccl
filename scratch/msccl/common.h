@@ -72,6 +72,8 @@ std::string trace_output_file = "mix.tr";
 std::string fct_output_file = "fct.txt";
 std::string pfc_output_file = "pfc.txt";
 std::string send_output_file = ""; // default no send output
+std::string comm_domain_file = ""; // Communication domain configuration file
+std::string mpi_flow_file = ""; // MPI flow configuration file
 
 double error_rate_per_link = 0.0;
 uint32_t has_win = 1;
@@ -109,6 +111,8 @@ void InitConfigMap()
     config_map["TOPOLOGY_FILE"] = std::make_unique<ConfigVar<std::string>>(topology_file);
     config_map["ALGO_FILE"] = std::make_unique<ConfigVar<std::string>>(algo_file);
     config_map["TRACE_FILE"] = std::make_unique<ConfigVar<std::string>>(trace_file);
+    config_map["COMM_DOMAIN_FILE"] = std::make_unique<ConfigVar<std::string>>(comm_domain_file);
+    config_map["MPI_FLOW_FILE"] = std::make_unique<ConfigVar<std::string>>(mpi_flow_file);
     config_map["TRACE_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(trace_output_file);
     config_map["FCT_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(fct_output_file);
     config_map["PFC_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(pfc_output_file);
@@ -186,6 +190,509 @@ std::vector<std::vector<int>> all_gpus;
 int ngpus_per_node;
 
 /************************************************
+ * Communication Domain configuration
+ ***********************************************/
+struct CommunicationDomain
+{
+    uint32_t domain_id;              // 通信域ID
+    std::string domain_name;         // 通信域名称（可选，用于可读性）
+    std::vector<uint32_t> gpu_ranks; // 包含的GPU rank列表
+    uint32_t num_gpus;               // GPU数量
+
+    CommunicationDomain() : domain_id(0), gpu_ranks({}), num_gpus(0) {}
+};
+
+std::unordered_map<uint32_t, CommunicationDomain> comm_domains; // domain_id -> domain
+
+/************************************************
+ * MPI Flow configuration
+ ***********************************************/
+struct MPIFlow
+{
+    uint32_t flow_id;           // 集合通信编号
+    std::string algo_file_path; // 算法文件路径
+    int depend_on;              // 依赖的flow编号，-1表示立即执行
+    uint32_t comm_domain_id;    // 通信域ID
+    double start_time;          // 实际开始时间（调度后计算得出）
+    bool completed;             // 是否已完成
+
+    MPIFlow() : flow_id(0), depend_on(-1), comm_domain_id(0), start_time(-1.0), completed(false) {}
+};
+
+std::vector<MPIFlow> mpi_flows;
+
+/************************************************
+ * Connnection
+ ***********************************************/
+struct Connection // uni-directional connection
+{
+    uint32_t src;
+    uint32_t dst;
+    int channel_id; // channel ID for multi-channel links
+
+    Ptr<RdmaClient> sender_client; // RdmaClient for sender
+    Ptr<RdmaClient> receiver_client; // RdmaClient for receiver
+};
+
+std::string getConnKey(const Connection& conn)
+{
+    return std::to_string(conn.src) + "->" + std::to_string(conn.dst) +
+           " chan:" + std::to_string(conn.channel_id);
+}
+
+std::string getConnKey(uint32_t src, uint32_t dst, int channel_id)
+{
+    return std::to_string(src) + "->" + std::to_string(dst) +
+           " chan:" + std::to_string(channel_id);
+}
+
+std::vector<Connection> all_connections;
+std::map<std::string, uint32_t> key2conn_id; // connection key -> connection ID
+uint16_t priority_group = 3;
+
+// Forward declarations (after struct definitions)
+CommunicationDomain* GetCommDomain(uint32_t domain_id);
+bool SetupAlgorithmFromXML(const std::string& xml_file_path, double start_time, const std::vector<uint32_t>& gpu_ranks);
+void SetupConnection(Connection& conn);
+extern NodeContainer n;
+
+void InitAllConnections()
+{
+    all_connections.clear();
+    key2conn_id.clear();
+}
+
+Connection AddConnection(uint32_t src, uint32_t dst, int channel_id)
+{
+
+    if (key2conn_id.find(getConnKey(src, dst, channel_id)) != key2conn_id.end())
+    {
+        NS_LOG_INFO("Connection " << getConnKey(src, dst, channel_id) << " already exists!");
+        return all_connections[key2conn_id[getConnKey(src, dst, channel_id)]];
+    }
+
+    NS_LOG_INFO("Adding Connection " << getConnKey(src, dst, channel_id));
+
+    Connection conn;
+    conn.src = src;
+    conn.dst = dst;
+    conn.channel_id = channel_id;
+    all_connections.push_back(conn);
+    uint32_t conn_idx = all_connections.size() - 1;
+    key2conn_id[getConnKey(conn)] = conn_idx;
+    NS_LOG_INFO("New connection ID: " << conn_idx << ", of conn key: " << getConnKey(conn));
+
+    SetupConnection(all_connections[conn_idx]);
+    return all_connections[conn_idx];
+}
+
+
+/**
+ * \brief Callback when an MPI flow completes
+ * \param flow_id The ID of the completed flow
+ */
+void OnMPIFlowComplete(uint32_t flow_id)
+{
+    NS_LOG_INFO("MPI Flow " << flow_id << " completed at time " << Simulator::Now().GetSeconds() << "s");
+    
+    if (flow_id >= mpi_flows.size())
+    {
+        NS_LOG_ERROR("Invalid flow_id: " << flow_id);
+        return;
+    }
+    
+    mpi_flows[flow_id].completed = true;
+    
+    // Check if any flows are waiting for this flow to complete
+    for (uint32_t i = 0; i < mpi_flows.size(); i++)
+    {
+        if (mpi_flows[i].depend_on == (int)flow_id && !mpi_flows[i].completed && mpi_flows[i].start_time < 0)
+        {
+            // Get communication domain for this flow
+            CommunicationDomain* domain = GetCommDomain(mpi_flows[i].comm_domain_id);
+            if (domain == nullptr)
+            {
+                NS_LOG_ERROR("Communication domain " << mpi_flows[i].comm_domain_id << " not found for Flow " << i);
+                continue;
+            }
+            
+            // Schedule this dependent flow to start immediately
+            double start_time = Simulator::Now().GetSeconds();
+            mpi_flows[i].start_time = start_time;
+            NS_LOG_INFO("Scheduling dependent MPI Flow " << i << " at time " << start_time 
+                       << "s (comm_domain=" << mpi_flows[i].comm_domain_id << ", " << domain->domain_name << ")");
+
+            bool success = SetupAlgorithmFromXML(mpi_flows[i].algo_file_path, start_time, domain->gpu_ranks);
+            if (!success)
+            {
+                NS_LOG_ERROR("Failed to setup MPI Flow " << i);
+            }
+        }
+    }
+}
+
+/**
+ * \brief Setup all MPI flows based on dependencies
+ * \return true if setup successful, false otherwise
+ */
+bool SetupMPIFlows()
+{
+    if (mpi_flows.empty())
+    {
+        NS_LOG_INFO("No MPI flows to setup");
+        return false;
+    }
+    
+    NS_LOG_INFO("Setting up " << mpi_flows.size() << " MPI flows");
+    
+    for (uint32_t i = 0; i < mpi_flows.size(); i++)
+    {
+        if (mpi_flows[i].depend_on == -1)
+        {
+            // Get communication domain for this flow
+            CommunicationDomain* domain = GetCommDomain(mpi_flows[i].comm_domain_id);
+            if (domain == nullptr)
+            {
+                NS_LOG_ERROR("Communication domain " << mpi_flows[i].comm_domain_id << " not found for Flow " << i);
+                return false;
+            }
+
+            mpi_flows[i].start_time = collective_start_time;
+            NS_LOG_INFO("Scheduling independent MPI Flow " << i << " at time " << collective_start_time 
+                       << "s (comm_domain=" << mpi_flows[i].comm_domain_id << ", " << domain->domain_name << ")");
+
+            bool success = SetupAlgorithmFromXML(mpi_flows[i].algo_file_path, collective_start_time, domain->gpu_ranks);
+            if (!success)
+            {
+                NS_LOG_ERROR("Failed to setup MPI Flow " << i);
+                return false;
+            } else {
+                NS_LOG_INFO("MPI Flow " << i << " setup successfully");
+            }
+        }
+    }
+    
+    return true;
+}
+
+/**
+ * \brief Read MPI flow configuration file
+ * \param mpi_flow_file_path Path to the MPI flow configuration file
+ * \return true if read successful, false otherwise
+ */
+bool ReadMPIFlowFile(const std::string& mpi_flow_file_path)
+{
+    if (mpi_flow_file_path.empty())
+    {
+        NS_LOG_INFO("No MPI flow file specified, using single XML mode");
+        return false;
+    }
+
+    std::ifstream mpi_flow_stream;
+    mpi_flow_stream.open(mpi_flow_file_path.c_str());
+    if (!mpi_flow_stream.is_open())
+    {
+        NS_LOG_ERROR("Failed to open MPI flow file: " << mpi_flow_file_path);
+        return false;
+    }
+
+    uint32_t num_flows;
+    mpi_flow_stream >> num_flows;
+    
+    NS_LOG_INFO("Reading " << num_flows << " MPI flows from: " << mpi_flow_file_path);
+    
+    mpi_flows.clear();
+    mpi_flows.reserve(num_flows);
+
+    for (uint32_t i = 0; i < num_flows; i++)
+    {
+        MPIFlow flow;
+        mpi_flow_stream >> flow.flow_id >> flow.algo_file_path >> flow.depend_on >> flow.comm_domain_id;
+        
+        if (mpi_flow_stream.fail())
+        {
+            NS_LOG_ERROR("Failed to parse MPI flow at line " << (i + 2));
+            mpi_flow_stream.close();
+            return false;
+        }
+
+        if (flow.flow_id != i)
+        {
+            NS_LOG_WARN("Flow ID " << flow.flow_id << " does not match expected index " << i);
+        }
+
+        // 验证依赖关系
+        if (flow.depend_on >= (int)flow.flow_id && flow.depend_on != -1)
+        {
+            NS_LOG_ERROR("Invalid dependency: Flow " << flow.flow_id << " depends on Flow " << flow.depend_on 
+                        << " (circular or forward dependency)");
+            mpi_flow_stream.close();
+            return false;
+        }
+
+        // 验证通信域是否存在
+        CommunicationDomain* domain = GetCommDomain(flow.comm_domain_id);
+        if (domain == nullptr)
+        {
+            NS_LOG_ERROR("Invalid comm_domain_id: " << flow.comm_domain_id << " for Flow " << flow.flow_id);
+            mpi_flow_stream.close();
+            return false;
+        }
+
+        mpi_flows.push_back(flow);
+        NS_LOG_INFO("MPI Flow " << flow.flow_id << ": algo=" << flow.algo_file_path 
+                   << ", depend=" << flow.depend_on << ", comm_domain=" << flow.comm_domain_id 
+                   << " (" << domain->domain_name << ")");
+    }
+
+    mpi_flow_stream.close();
+    return true;
+}
+
+/**
+ * \brief Setup algorithm configuration from XML file
+ * \param xml_file_path Path to the XML algorithm file
+ * \param start_time The start time for collective operations (in seconds)
+ * \param gpu_ranks List of GPU ranks involved in this algorithm
+ * \return true if setup successful, false otherwise
+ * 
+ * This function loads an XML algorithm file and configures:
+ * 1. GPU nodes with their ranks (with offset)
+ * 2. GPUThreadBlock applications
+ * 3. RDMA client connections for communication
+ */
+bool SetupAlgorithmFromXML(const std::string& xml_file_path, double start_time = collective_start_time, const std::vector<uint32_t>& gpu_ranks = {})
+{
+    NS_LOG_INFO("Setting up algorithm from XML file: " << xml_file_path);
+
+    // Load XML file
+    tinyxml2::XMLDocument xml_doc;
+    auto xml_load_result = xml_doc.LoadFile(xml_file_path.c_str());
+    if (xml_load_result != tinyxml2::XML_SUCCESS)
+    {
+        NS_LOG_ERROR("Failed to open algo xml file: " << xml_file_path);
+        return false;
+    }
+
+    tinyxml2::XMLElement *algo = xml_doc.FirstChildElement("algo");
+    if (algo == nullptr)
+    {
+        NS_LOG_ERROR("No <algo> element found in algo xml file: " << xml_file_path);
+        return false;
+    }
+    
+    // First pass: build a map of GPU rank -> XMLElement
+    std::unordered_map<uint32_t, tinyxml2::XMLElement*> rank_to_gpu_xml;
+    auto gpu = algo->FirstChildElement("gpu");
+    while (gpu != nullptr)
+    {
+        uint32_t gpu_rank = gpu->IntAttribute("id");
+        rank_to_gpu_xml[gpu_rank] = gpu;
+        gpu = gpu->NextSiblingElement("gpu");
+    }
+
+    // Second pass: map rank -> Node
+    //      Setup Communication Domain
+    std::unordered_map<uint32_t, std::pair<Ptr<GPUNode>, uint32_t>> rank2node_peer; // rank -> (Node, node_id)
+    for (auto i = gpu_ranks.begin(); i != gpu_ranks.end(); ++i)
+    {
+        uint32_t rank = *i;
+        uint32_t node_id = rank;  // In this system, rank directly corresponds to node_id
+        Ptr<Node> node = n.Get(node_id);
+        Ptr<GPUNode> gpu_node = DynamicCast<GPUNode>(node);
+        rank2node_peer[rank] = make_pair(gpu_node, node_id);
+        if (gpu_node == nullptr)
+        {
+            NS_LOG_ERROR("Invalid node_id " << node_id << " for rank " << rank << " (node is not a GPUNode)");
+            return false;
+        } 
+    }
+
+    // Third pass: assign ranks to GPU nodes and install applications with rank offset
+    NodeContainer gpu_nodes{0};
+    for (uint32_t i = 0; i < node_num; i++)
+    {
+        if (n.Get(i)->GetNodeType() == 0)
+        {
+            gpu_nodes = NodeContainer(gpu_nodes, n.Get(i));
+        }
+    }
+
+    // Fourth pass: Install applications based on XML configuration
+    for (auto it = rank_to_gpu_xml.begin(); it != rank_to_gpu_xml.end(); ++it)
+    {
+        uint32_t xml_rank = it->first;  // Rank defined in XML file (0, 1, 2, ...)
+        tinyxml2::XMLElement* gpu_xml = it->second;
+
+        uint32_t rank_node_id = rank2node_peer[xml_rank].second;
+
+        Ptr<GPUNode> gpu_node = DynamicCast<GPUNode>(gpu_nodes.Get(rank_node_id));
+        gpu_node->SetRank(xml_rank);
+
+        // Find the actual node ID in the global node container
+        uint32_t node_id = gpu_node->GetId();
+
+        GPUThreadBlockHelper helper(gpu_xml);
+        ApplicationContainer apps = helper.Install(gpu_node);
+        apps.Start(Seconds(start_time));
+    }
+
+    NS_LOG_INFO("Algorithm has been configured from XML: " << xml_file_path);
+
+    // Setup RDMA connections for GPU nodes with reuse support
+    // Using global priority_group variable
+
+    for (uint32_t i = 0; i < gpu_nodes.GetN(); i++)
+    {
+        Ptr<GPUNode> this_gpu = DynamicCast<GPUNode>(gpu_nodes.Get(i));
+        
+        // Skip GPU nodes without thread blocks
+        if (this_gpu->GetNThreadBlocks() == 0)
+            continue;
+
+        // List all threadblock in this gpu
+        for (uint32_t j = 0; j < this_gpu->GetNThreadBlocks(); j++)
+        {
+            Ptr<ThreadBlock> tb = this_gpu->GetThreadBlock(j);
+            int send_peer = tb->GetSend();
+            int recv_peer = tb->GetRecv();
+            int channel = tb->GetChannel();
+
+            uint32_t send_peer_node = (send_peer == -1) ? UINT32_MAX : rank2node_peer[send_peer].second;
+            uint32_t recv_peer_node = (recv_peer == -1) ? UINT32_MAX : rank2node_peer[recv_peer].second;
+            uint32_t this_node = rank2node_peer[this_gpu->GetRank()].second;
+
+            Connection send_conn = AddConnection(this_node, send_peer_node, channel);
+            Connection recv_conn = AddConnection(recv_peer_node, this_node, channel);
+            
+            NS_LOG_INFO("Binding TB (rank " << this_gpu->GetRank() << ", node " << this_node 
+                        << ") send to rank " << send_peer << " (node " << send_peer_node 
+                        << "), recv from rank " << recv_peer << " (node " << recv_peer_node 
+                        << "), channel " << channel);
+            NS_LOG_INFO("  Send Conn Key: " << getConnKey(send_conn) << " , Sender Client Ptr: " << send_conn.sender_client);
+            NS_LOG_INFO("  Recv Conn Key: " << getConnKey(recv_conn) << " , Receiver Client Ptr: " << recv_conn.receiver_client);
+            tb->BindRdmaClients(send_conn.sender_client, recv_conn.receiver_client);          
+        }
+    }
+
+    NS_LOG_INFO("RDMA connections have been setup for algorithm from XML: " << xml_file_path);
+    return true;
+}
+
+/**
+ * \brief Read communication domain configuration file
+ * \param comm_domain_file_path Path to the communication domain configuration file
+ * \return true if read successful, false otherwise
+ * 
+ * File format:
+ * <num_domains>
+ * <domain_id> <domain_name> <num_gpus> <rank_0> <rank_1> ... <rank_n>
+ * or
+ * <domain_id> <domain_name> <rank_start>-<rank_end>
+ */
+bool ReadCommDomainFile(const std::string& comm_domain_file_path)
+{
+    if (comm_domain_file_path.empty())
+    {
+        NS_LOG_INFO("No communication domain file specified, using default single domain");
+        return false;
+    }
+
+    std::ifstream comm_domain_stream;
+    comm_domain_stream.open(comm_domain_file_path.c_str());
+    if (!comm_domain_stream.is_open())
+    {
+        NS_LOG_ERROR("Failed to open communication domain file: " << comm_domain_file_path);
+        return false;
+    }
+
+    uint32_t num_domains;
+    comm_domain_stream >> num_domains;
+
+    NS_LOG_INFO("Reading " << num_domains << " communication domains from: " << comm_domain_file_path);
+    
+    comm_domains.clear();
+
+    for (uint32_t i = 0; i < num_domains; i++)
+    {
+        CommunicationDomain domain;
+        comm_domain_stream >> domain.domain_id >> domain.domain_name;
+        
+        std::string gpu_spec;
+        comm_domain_stream >> gpu_spec;
+
+        // start-end :=> [start_time, end_time]
+        if (gpu_spec.find('-') != std::string::npos)
+        {
+            size_t dash_pos = gpu_spec.find('-');
+            uint32_t start_rank = std::stoi(gpu_spec.substr(0, dash_pos));
+            uint32_t end_rank = std::stoi(gpu_spec.substr(dash_pos + 1));
+            for (uint32_t rank = start_rank; rank <= end_rank; rank++)
+            {
+                domain.gpu_ranks.push_back(rank);
+            }
+            domain.num_gpus = end_rank - start_rank + 1;
+            
+            
+            NS_LOG_INFO("Communication Domain " << domain.domain_id << " (" << domain.domain_name 
+                       << "): ranks " << start_rank << "-" << end_rank 
+                       << " (" << domain.num_gpus << " GPUs)");
+        }
+        else
+        {
+            // list: num_gpus rank0 rank1 rank2 ...
+            domain.num_gpus = std::stoi(gpu_spec);
+            domain.gpu_ranks.reserve(domain.num_gpus);
+            
+            for (uint32_t j = 0; j < domain.num_gpus; j++)
+            {
+                uint32_t rank;
+                comm_domain_stream >> rank;
+                domain.gpu_ranks.push_back(rank);
+            }
+            
+            NS_LOG_INFO("Communication Domain " << domain.domain_id << " (" << domain.domain_name 
+                       << "): " << domain.num_gpus << " GPUs, starting at rank " << domain.gpu_ranks[0]);
+        }
+        
+        if (comm_domain_stream.fail())
+        {
+            NS_LOG_ERROR("Failed to parse communication domain at line " << (i + 2));
+            comm_domain_stream.close();
+            return false;
+        }
+
+        if (comm_domains.find(domain.domain_id) != comm_domains.end())
+        {
+            NS_LOG_ERROR("Duplicate domain_id: " << domain.domain_id);
+            comm_domain_stream.close();
+            return false;
+        }
+
+        comm_domains[domain.domain_id] = domain;
+    }
+
+    comm_domain_stream.close();
+    return true;
+}
+
+/**
+ * \brief Get communication domain by ID
+ * \param domain_id The domain ID to lookup
+ * \return Pointer to the domain, or nullptr if not found
+ */
+CommunicationDomain* GetCommDomain(uint32_t domain_id)
+{
+    auto it = comm_domains.find(domain_id);
+    if (it != comm_domains.end())
+    {
+        return &(it->second);
+    }
+    return nullptr;
+}
+
+
+/************************************************
  * monitor varibles
  ***********************************************/
 // seems useless, but actually exsits in Original source
@@ -233,7 +740,7 @@ map<Ptr<Node>, map<Ptr<Node>, uint64_t>> pairBdp;
 map<uint32_t, map<uint32_t, uint64_t>> pairRtt;
 
 map<int, Ptr<Node>> rank2node;
-map<int, pair<Ptr<Node>, uint32_t>> rank2node_peer; // pair<node, number>
+// map<int, pair<Ptr<Node>, uint32_t>> rank2node_peer; // pair<node, number>
 
 Ipv4Address node_id_to_ip(uint32_t id)
 {
@@ -716,6 +1223,7 @@ uint64_t get_nic_rate(NodeContainer &n)
             return DynamicCast<QbbNetDevice>(n.Get(i)->GetDevice(1))
                 ->GetDataRate()
                 .GetBitRate();
+    return 0; // Return 0 if no suitable node is found
 }
 
 bool ReadConf(int argc, char *argv[])
@@ -867,6 +1375,68 @@ void SetConfig()
                Pint::get_n_bytes());
     }
 }
+
+/**
+ * \brief Setup RdmaClient and it's callbacks for a given Connection
+ * \param conn The Connection to setup
+ * \param tb The ThreadBlock to bind the RdmaClient
+ */
+void SetupConnection(Connection& conn)
+{
+    uint32_t dst = conn.dst;
+    uint32_t src = conn.src;
+
+    uint16_t node_sport;
+    uint16_t remote_node_sport;
+    RdmaClientHelper my_clientHelper;
+
+    if (dst != UINT32_MAX){
+        node_sport = portNumber[src][dst]++;
+        uint32_t dport = 100;
+        my_clientHelper = RdmaClientHelper(
+            priority_group, serverAddress[src], serverAddress[dst], node_sport, dport,
+            0, // create a qp w/o message
+            has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(src)][n.Get(dst)]) : 0,
+            global_t == 1 ? maxRtt : pairRtt[src][dst],
+            nullptr, nullptr,
+            1, src, dst,
+            false, false); // passive destroy, not operations run
+
+        ApplicationContainer app = my_clientHelper.Install(n.Get(src));
+        NS_LOG_INFO("Create a send connection from " << src << " to " << dst << ", src port: " << node_sport << ", dst port: " << dport << " @node " << src);
+        app.Start(Seconds(simulator_start_time));
+
+        conn.sender_client = DynamicCast<RdmaClient>(app.Get(0));
+        conn.sender_client -> AddTxChannel((uint64_t)dst << 32 | (uint64_t)node_sport << 16 |  (uint64_t)priority_group);
+    }else{
+        NS_LOG_INFO("Not a send node, create a loopback connection");
+        my_clientHelper = RdmaClientHelper(
+            priority_group, serverAddress[src], serverAddress[src], 100, 100,
+            0, 0, 0, nullptr, nullptr, 1, src, src, false, false);
+
+        ApplicationContainer appThisChannel = my_clientHelper.Install(n.Get(src));
+        appThisChannel.Start(Seconds(simulator_start_time));
+        
+        conn.sender_client = DynamicCast<RdmaClient>(appThisChannel.Get(0));
+        node_sport = 1;
+    }
+
+    NS_LOG_INFO("Create a recv connection any way @node " << dst << ", dst "<< dst << ", sport: " << node_sport);
+    my_clientHelper = RdmaClientHelper(
+        priority_group, serverAddress[dst], serverAddress[dst], 100, 100,
+        0, 0, 0, nullptr, nullptr, 1, src, src, false, false);
+
+    ApplicationContainer app = my_clientHelper.Install(n.Get(dst));
+    app.Start(Seconds(simulator_start_time));
+
+    conn.receiver_client = DynamicCast<RdmaClient>(app.Get(0));
+    conn.receiver_client -> AddRxChannel(std::make_pair(
+        (uint64_t)dst << 32 | (uint64_t)node_sport << 16 |  (uint64_t)priority_group,
+        src));
+
+    return;
+}
+
 
 void SetupNetwork(
     void (*qp_finish)(FILE *, Ptr<RdmaQueuePair>),
@@ -1249,178 +1819,14 @@ void SetupNetwork(
     // Algorithm configuration
     /////////////////////////////////////////////////////
 
-    // avoid <optimized out> in -O3
-    auto xml_load_result = algo_xml_doc.LoadFile(algo_file.c_str());
-    NS_ASSERT_MSG(
-        xml_load_result == tinyxml2::XML_SUCCESS,
-        "Failed to open algo xml file: " << algo_file);
+    bool comm_domain_read = ReadCommDomainFile(comm_domain_file);
+    NS_ASSERT_MSG(comm_domain_read, "Failed to read communication domain file: " << comm_domain_file);
 
-    tinyxml2::XMLElement *algo = algo_xml_doc.FirstChildElement("algo");
-    NS_ASSERT_MSG(algo != nullptr, "No <algo> element found in algo xml file");
-    
-    // First pass: build a map of GPU rank -> XMLElement
-    std::unordered_map<uint32_t, tinyxml2::XMLElement*> rank_to_gpu_xml;
-    auto gpu = algo->FirstChildElement("gpu");
-    while (gpu != nullptr)
-    {
-        uint32_t gpu_rank = gpu->IntAttribute("id");
-        rank_to_gpu_xml[gpu_rank] = gpu;
-        gpu = gpu->NextSiblingElement("gpu");
-    }
-    
-    // Second pass: assign ranks to GPU nodes and install applications only for matching ranks
-    NodeContainer gpu_nodes{0};
-    uint32_t current_gpu_rank = 0;
-    for (uint32_t i = 0; i < node_num; i++)
-    {
-        if (n.Get(i)->GetNodeType() == 0)
-        {
-            gpu_nodes = NodeContainer(gpu_nodes, n.Get(i));
+    bool mpi_flow_read = ReadMPIFlowFile(mpi_flow_file);
+    NS_ASSERT_MSG(mpi_flow_read, "Failed to read MPI flow file: " << mpi_flow_file);
 
-            auto gpu_node = DynamicCast<GPUNode>(n.Get(i));
-            gpu_node->SetRank(current_gpu_rank);
-            rank2node_peer[current_gpu_rank] = make_pair(n.Get(i), i);
-            
-            // Only install GPUThreadBlock if this rank has configuration in XML
-            if (rank_to_gpu_xml.find(current_gpu_rank) != rank_to_gpu_xml.end())
-            {
-                tinyxml2::XMLElement* gpu_xml = rank_to_gpu_xml[current_gpu_rank];
-                NS_LOG_INFO("Installing GPUThreadBlock for GPU rank " << current_gpu_rank << " on node " << i);
-
-                GPUThreadBlockHelper helper(gpu_xml);
-            ApplicationContainer apps = helper.Install(DynamicCast<GPUNode>(n.Get(i)));
-                apps.Start(Seconds(collective_start_time));
-            }
-            else
-            {
-                NS_LOG_INFO("Skipping GPUThreadBlock installation for GPU rank " << current_gpu_rank 
-                           << " on node " << i << " (no matching configuration in XML)");
-            }
-            
-            current_gpu_rank++;
-        }
-    }
-
-    NS_LOG_INFO("Algorithm has been configured.");
-
-    uint16_t priority_group = 3;
-
-    for (uint32_t i = 0; i < gpu_nodes.GetN(); i++)
-    {
-        Ptr<GPUNode> this_gpu = DynamicCast<GPUNode>(gpu_nodes.Get(i));
-
-        // list all threadblock in this gpu
-        //  TODO: CHANNEL ///////////!!!!!!!!!!!!!!!!
-        for (uint32_t j = 0; j < this_gpu->GetNThreadBlocks(); j++)
-        {
-
-            Ptr<ThreadBlock> tb = this_gpu->GetThreadBlock(j);
-            int send_peer = tb->GetSend();
-            int recv_peer = tb->GetRecv();
-            int channel = tb->GetChannel();
-
-            Ptr<RdmaClient> my_client = nullptr;
-            RdmaClientHelper my_clientHelper;
-
-            uint32_t node_src_i = rank2node_peer[this_gpu->GetRank()].second;
-            uint16_t recv_peer_sport, node_sport;
-            uint32_t send_peer_i, recv_peer_i;
-
-            // not a send node
-            if (send_peer == -1)
-            {
-                NS_LOG_INFO("Not a send node, create a loopback connection");
-                my_clientHelper = RdmaClientHelper(
-                    priority_group, serverAddress[node_src_i], serverAddress[node_src_i], 100, 100,
-                    0, 0, 0, nullptr, nullptr, 1, node_src_i, node_src_i, false, false);
-
-                ApplicationContainer appThisChannel = my_clientHelper.Install(n.Get(node_src_i));
-                my_client = DynamicCast<RdmaClient>(appThisChannel.Get(0));
-                appThisChannel.Start(Seconds(simulator_start_time));
-                // my_client->Setup();
-
-                node_sport = 1;
-                connection_map[getHashKey(node_src_i, node_src_i, priority_group, channel)] = my_client;
-            }
-            else // is a send node
-            {
-                send_peer_i = rank2node_peer[send_peer].second;
-
-                std::string key = getHashKey(node_src_i, send_peer_i, priority_group, channel);
-
-                if (connection_map.find(key) != connection_map.end())
-                {
-                    NS_LOG_INFO("Connection already exists, reuse it");
-                    my_client = connection_map[key];
-                    node_sport = my_client->GetLocal().second;
-                }
-                else
-                {
-                    node_sport = portNumber[node_src_i][send_peer_i]++;
-                    uint32_t dport = 100;
-                    my_clientHelper = RdmaClientHelper(
-                        priority_group, serverAddress[node_src_i], serverAddress[send_peer_i], node_sport, dport,
-                        0, // create a qp w/o message
-                        has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(node_src_i)][n.Get(send_peer_i)]) : 0,
-                        global_t == 1 ? maxRtt : pairRtt[node_src_i][send_peer_i],
-                        nullptr, nullptr,
-                        1, node_src_i, send_peer_i,
-                        false, false); // passive destroy, not operations run
-
-                    ApplicationContainer app = my_clientHelper.Install(n.Get(node_src_i));
-                    my_client = DynamicCast<RdmaClient>(app.Get(0));
-                    // my_client->Setup();
-                    app.Start(Seconds(simulator_start_time));
-
-                    connection_map[key] = my_client;
-                }
-            }
-            if (recv_peer >= 0)
-            {
-                uint16_t port;
-                recv_peer_i = rank2node_peer[recv_peer].second;
-
-                std::string key = getHashKey(recv_peer_i, node_src_i, priority_group, channel);
-
-                if (connection_map.find(key) != connection_map.end())
-                {
-                    recv_peer_sport = connection_map[key]->GetLocal().second;
-                }
-                else
-                {
-                    uint32_t sport = portNumber[recv_peer_i][node_src_i]++;
-                    uint32_t dport = 100;
-                    RdmaClientHelper clientHelper(
-                        priority_group, serverAddress[recv_peer_i], serverAddress[node_src_i], sport, dport,
-                        0, // create a qp w/o message
-                        has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(recv_peer_i)][n.Get(node_src_i)]) : 0,
-                        global_t == 1 ? maxRtt : pairRtt[recv_peer_i][node_src_i],
-                        nullptr, nullptr,
-                        1, recv_peer_i, node_src_i,
-                        false, false); // passive destroy, not operations run
-
-                    ApplicationContainer app = clientHelper.Install(n.Get(recv_peer_i));
-                    Ptr<RdmaClient> client = DynamicCast<RdmaClient>(app.Get(0));
-
-                    recv_peer_sport = sport;
-
-                    connection_map[key] = client;
-                    // client->Setup();
-                    app.Start(Seconds(simulator_start_time));
-                }
-            }
-
-            if (send_peer >= 0)
-                my_client->AddTxChannel(((uint64_t)serverAddress[send_peer_i].Get() << 32) | ((uint64_t)node_sport << 16) | (uint64_t)priority_group);
-
-            if (recv_peer >= 0)
-                my_client->AddRxChannel(std::make_pair(
-                    (((uint64_t)serverAddress[node_src_i].Get() << 32) | ((uint64_t)recv_peer_sport << 16) | (uint64_t)priority_group),
-                    serverAddress[recv_peer_i].Get()));
-
-            tb->BindRdmaClient(my_client);
-        }
-    }
+    bool mpi_setup_success = SetupMPIFlows();
+    NS_ASSERT_MSG(mpi_setup_success, "Failed to setup MPI flows from file: " << mpi_flow_file);
 
     /////////////////////////////////////////////////////
     // Trace configuration
