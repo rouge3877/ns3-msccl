@@ -19,6 +19,11 @@ ThreadBlock::GetTypeId()
             .SetParent<Application>()
             .SetGroupName("AllStack")
             .AddConstructor<ThreadBlock>()
+            .AddTraceSource (
+                "TotalSendMessageNum",
+                "Total number of messages to send",
+                MakeTraceSourceAccessor(&ThreadBlock::m_total_send_message_num_trace),
+                "ns3::TracedValueCallback::Int32")
             .AddAttribute(
                 "id",
                 "The id of this thread block",
@@ -62,7 +67,10 @@ ThreadBlock::ThreadBlock()
     m_deps = 0;
     m_chunkSize = 1024;
     m_recv_message_num = 0;
-    m_total_send_message_num = 0;
+    m_total_send_message_num_trace = 0;
+    m_total_send_message_num_trace.ConnectWithoutContext(
+        MakeCallback(&ThreadBlock::SendMessageNumChanged, this));
+    m_step_finish_flag = false;
 }
 
 ThreadBlock::~ThreadBlock()
@@ -208,6 +216,8 @@ ThreadBlock::DoStep()
 {
     NS_LOG_FUNCTION(this);
     Ptr<ThreadBlockStep> step = *m_currentStep;
+    NS_LOG_INFO("GPU " << m_node->GetId() << " ThreadBlock " << m_id << " Step " << step->GetS() << " [" << step->GetType() << "]"
+                << " start. ( rank = " << DynamicCast<GPUNode>(m_node)->GetRank() << ", tb_id = " << m_id << " )");
 
     switch(step->GetType())
     {
@@ -285,14 +295,27 @@ ThreadBlock::CompleteThreadBlock()
 {
     NS_LOG_FUNCTION(this);
     // all steps complete
-    if (m_total_send_message_num > 0)
+    if (m_total_send_message_num_trace > 0)
     {
         // wait for all send complete
-        Simulator::Schedule(Seconds(0.001), &ThreadBlock::CompleteThreadBlock, this);
+        m_step_finish_flag = true;
         return;
     }
     m_gpuNode->FinishedTBCallback();
     return;
+}
+
+void
+ThreadBlock::SendMessageNumChanged(int oldValue, int newValue)
+{
+    NS_LOG_FUNCTION(this << oldValue << newValue);
+
+    if (newValue == 0 && m_step_finish_flag)
+    {
+        m_step_finish_flag = false; // 重置标志以防止重复调用
+        NS_LOG_INFO("All send operations completed. Finishing ThreadBlock.");
+        m_gpuNode->FinishedTBCallback();
+    }
 }
 
 void
@@ -306,7 +329,7 @@ void
 ThreadBlock::DoSend(uint32_t chunks)
 {
     NS_LOG_FUNCTION(this);
-    m_total_send_message_num += 1;
+    m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
 
     Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
     uint64_t size = chunks * m_chunkSize;
@@ -357,7 +380,7 @@ ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
         m_recv_message_num--;
 
         // 这里假设 Reduce 和 Copy 是同时进行的
-        m_total_send_message_num += 1;
+        m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
 
         Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
@@ -378,7 +401,7 @@ ThreadBlock::DoRecvReduceSend(uint32_t chunks)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-        m_total_send_message_num += 1;
+        m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
 
         Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
@@ -399,7 +422,7 @@ ThreadBlock::DoRecvCopySend(uint32_t chunks)
     {
         // 如果有可用的消息数量，直接完成并减一
         m_recv_message_num--;
-        m_total_send_message_num += 1;
+        m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
         Simulator::Schedule(Seconds(COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
         this->GetRdmaClient()->DoSend(size);
@@ -470,7 +493,7 @@ ThreadBlock::RecvMessageDone()
                 {
                     m_recv_message_num--;
                     Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
-                    m_total_send_message_num += 1;
+                    m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
                     this->GetRdmaClient()->DoSend(size);
                     break;
@@ -479,7 +502,7 @@ ThreadBlock::RecvMessageDone()
                 {
                     m_recv_message_num--;
                     Simulator::Schedule(Seconds(REDUCE_TIME), &ThreadBlock::CompleteStep, this);
-                    m_total_send_message_num += 1;
+                    m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
                     this->GetRdmaClient()->DoSend(size);
                     break;
@@ -488,7 +511,7 @@ ThreadBlock::RecvMessageDone()
                 {
                     m_recv_message_num--;
                     Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
-                    m_total_send_message_num += 1;
+                    m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
                     this->GetRdmaClient()->DoSend(size);
                     break;
@@ -504,7 +527,7 @@ void
 ThreadBlock::SendMessageDone()
 {
     NS_LOG_FUNCTION(this);
-    m_total_send_message_num -= 1;
+    m_total_send_message_num_trace.Set(m_total_send_message_num_trace - 1);
 }
 
 

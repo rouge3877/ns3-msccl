@@ -5,6 +5,7 @@
 #include "ns3/gpu-node.h"
 #include "ns3/application.h"
 #include "ns3/rdma-client.h"
+#include "ns3/traced-value.h"
 
 #define REDUCE_TIME 0.000001        // 1us
 #define SEND_TIME   0.000001        // 1us
@@ -41,6 +42,7 @@ class ThreadBlock : public Application
         void UpdateTBStatus(uint32_t index, uint32_t step); 
 
         void BindRdmaClient(Ptr<RdmaClient> client);
+        void SendMessageNumChanged(int oldValue, int newValue);
         Ptr<RdmaClient> GetRdmaClient();
 
         void RecvMessageDone();
@@ -86,7 +88,8 @@ class ThreadBlock : public Application
         Ptr<RdmaClient> m_rdma_client;
 
         int m_recv_message_num;   //!< number of recv messages, stay in buffer
-        int m_total_send_message_num;   //!< number of messages to send, for synchronization
+        ns3::TracedValue<int> m_total_send_message_num_trace; //!< trace of number of messages to send
+        bool m_step_finish_flag;   //!< whether the current step is finished
 };
 
 }
