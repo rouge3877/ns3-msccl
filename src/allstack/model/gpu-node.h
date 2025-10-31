@@ -18,6 +18,8 @@ class GPUNode : public Node
          */
         static TypeId GetTypeId();
 
+        GPUNode();
+
         uint32_t AddThreadBlock(Ptr<ThreadBlock> tb);
         void UpdateTBStatus(uint32_t index, uint32_t step);
         int GetTBStatus(uint32_t index);

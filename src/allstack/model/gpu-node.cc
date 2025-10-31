@@ -17,7 +17,7 @@ GPUNode::GetTypeId()
         TypeId("ns3::GPUNode")
             .SetParent<Node>()
             .SetGroupName("AllStack")
-            .AddConstructor<Node>()
+            .AddConstructor<GPUNode>()
             .AddAttribute(
                 "rank",
                 "The rank of this GPU node",
@@ -25,6 +25,12 @@ GPUNode::GetTypeId()
                 MakeIntegerAccessor(&GPUNode::m_rank),
                 MakeIntegerChecker<int32_t>());
     return tid;
+}
+
+GPUNode::GPUNode()
+    : Node(), m_rank(-1)
+{
+    NS_LOG_FUNCTION(this);
 }
 
 Ptr<ThreadBlock>
