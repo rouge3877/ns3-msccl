@@ -20,6 +20,7 @@
 #define PATH_TO_PGO_CONFIG "path_to_pgo_config"
 
 #include <fstream>
+#include <dirent.h>
 #include <iostream>
 #include <time.h>
 #include <unordered_map>
@@ -139,7 +140,6 @@ void InitConfigMap()
      * NS3 Config
      ***********************************************/
     // QbbNetDevice
-    config_map["CHUNK_SIZE"] = std::make_unique<ConfigNs3<uint32_t>>("ns3::ThreadBlock::chunkSize", 1024);
     config_map["ENABLE_QCN"] = std::make_unique<ConfigNs3<bool>>("ns3::QbbNetDevice::QcnEnabled", true);
     config_map["USE_DYNAMIC_PFC_THRESHOLD"] = std::make_unique<ConfigNs3<bool>>("ns3::QbbNetDevice::DynamicThreshold", true);
     config_map["PAUSE_TIME"] = std::make_unique<ConfigNs3<uint32_t>>("ns3::QbbNetDevice::PauseTime", 5);
@@ -374,6 +374,301 @@ std::unordered_map<std::string, Ptr<RdmaClient>> connection_map; // key is src_d
 inline std::string getHashKey(uint32_t src, uint32_t dst, uint16_t pg, int channel)
 {
     return std::to_string(src) + '_' + std::to_string(dst) + '_' + std::to_string(pg) + '_' + std::to_string(channel);
+}
+
+/************************************************
+ * About MSCCL Simulation
+ ***********************************************/
+
+// Global storage for XMLDocument objects to keep them alive
+std::map<std::string, std::unique_ptr<tinyxml2::XMLDocument>> msccl_xml_docs;
+std::map<std::string, tinyxml2::XMLElement*>
+LoadAllMscclAlgorithms(const std::string &xml_file_dir)
+{
+    NS_LOG_INFO("Loading all Msccl algorithms from directory: " << xml_file_dir);
+    std::map<std::string, tinyxml2::XMLElement*> msccl_name2algo;
+
+    // open the directory, and read all XML files
+    DIR *dir;
+    dir = opendir(xml_file_dir.c_str());
+    NS_ASSERT_MSG(dir != nullptr, "Could not open directory: " << xml_file_dir);
+
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != nullptr)
+    {
+        std::string file_name = ent->d_name;
+        if (file_name.size() > 4 && file_name.substr(file_name.size() - 4) == ".xml")
+        {
+            std::string file_path = xml_file_dir + file_name;
+            auto xml_doc = std::make_unique<tinyxml2::XMLDocument>();
+            auto xml_load_result = xml_doc->LoadFile(file_path.c_str());
+            NS_ASSERT_MSG(xml_load_result == tinyxml2::XML_SUCCESS, "Failed to open algo xml file: " << file_path);
+
+            tinyxml2::XMLElement *algo = xml_doc->FirstChildElement("algo");
+            NS_ASSERT_MSG(algo != nullptr, "No <algo> element found in algo xml file: " << file_path);
+
+            std::string algo_name = algo->Attribute("name");
+            msccl_name2algo[algo_name] = algo;
+            // Store the XMLDocument to keep it alive (pointer remains valid)
+            msccl_xml_docs[algo_name] = std::move(xml_doc);
+            NS_LOG_INFO("Loaded algorithm: " << algo_name << " from file: " << file_path);
+        }
+    }
+    closedir(dir);
+
+    return msccl_name2algo;
+}
+
+MPIStep
+ParseWorkLoadTraceLine(const std::string &line){
+    // format:
+    // name     cat     ranks     pid     tid     eid     abs_start_us     abs_end_us     rel_start_us     rel_end_us     dur_us     op_type     input_dims     input_type
+    // all_gather     op     [0, 1, 2, 3, 4, 5, 6, 7]     0     0     0     1760078710220546     1760078710220546     1637887     1637887     0     comm     1     torch.int64
+    // we focus on name, ranks, input_dims&input_type
+    // name to a string, ranks to vector<int>, input_dims times input_type to a size_t
+    std::istringstream ss(line);
+    std::string name, cat, ranks_str, input_dims_str, input_type;
+    // use a right way to parse each line
+    std::getline(ss, name, '\t');
+    std::getline(ss, cat, '\t');
+    std::getline(ss, ranks_str, '\t');
+    std::string temp;
+    for (int i = 0; i < 4; i++) std::getline(ss, temp, '\t'); // skip pid, tid, eid, abs_start_us
+    for (int i = 0; i < 4; i++) std::getline(ss, temp, '\t'); // skip abs_end_us, rel_start_us, rel_end_us, dur_us
+    std::getline(ss, temp, '\t'); // skip op_type
+    std::getline(ss, input_dims_str, '\t');
+    std::getline(ss, input_type, '\t');
+    
+    // parse ranks_str to vector<int>
+    std::vector<int> ranks;
+    // Check if ranks_str is a single number or a list
+    if (ranks_str.front() == '[' && ranks_str.back() == ']') {
+        // Parse as list: [2, 4, 5]
+        ranks_str = ranks_str.substr(1, ranks_str.size() - 2); // remove [ and ]
+        std::istringstream ranks_ss(ranks_str);
+        std::string rank_token;
+        while (std::getline(ranks_ss, rank_token, ',')) {
+            // Trim whitespace
+            rank_token.erase(0, rank_token.find_first_not_of(" \t"));
+            rank_token.erase(rank_token.find_last_not_of(" \t") + 1);
+            if (!rank_token.empty()) {
+                ranks.push_back(std::stoi(rank_token));
+            }
+        }
+    } else {
+        // Parse as single number: 8
+        ranks.push_back(std::stoi(ranks_str));
+    }
+
+    // parse input_dims_str to get total number of elements
+    // 1. use the number in input_type to get element size
+    size_t pos = input_type.size();
+    while (pos > 0 && isdigit(input_type[pos - 1])) pos--;
+    NS_ASSERT_MSG(pos < input_type.size(), "No digits found in input_type: " << input_type);
+    std::string num_str = input_type.substr(pos);
+    size_t bits = std::stoul(num_str);
+
+    size_t element_size = bits / 8;
+
+    // 2. parse input_dims lke [1, 2048, 2048] to get total number of elements
+    size_t total_elements = 1;
+    // Check if input_dims_str is a single number or a list
+    if (input_dims_str.front() == '[' && input_dims_str.back() == ']') {
+        // Parse as list: [2, 3, 4]
+        input_dims_str = input_dims_str.substr(1, input_dims_str.size() - 2); // remove [ and ]
+        std::istringstream dims_ss(input_dims_str);
+        std::string dim_token;
+        while (std::getline(dims_ss, dim_token, ',')){
+            // Trim whitespace
+            dim_token.erase(0, dim_token.find_first_not_of(" \t"));
+            dim_token.erase(dim_token.find_last_not_of(" \t") + 1);
+            if (!dim_token.empty()) {
+                total_elements *= std::stoul(dim_token);
+            }
+        }
+    } else {
+        // Parse as single number: 8
+        total_elements = std::stoul(input_dims_str);
+    }
+    size_t total_size_bytes = total_elements * element_size;
+
+    MPIStep step;
+    step.name = name;
+    step.ranks = ranks;
+    step.total_size_bytes = total_size_bytes;
+    NS_LOG_DEBUG("For step: " << name << ", total size (bytes): " << total_size_bytes);
+    step.algo = nullptr; // to be set later
+    return step;
+}
+
+// use global varibles: collective_start_time
+void
+LoadGpuWorkloadTrace(Ptr<GPUNode> gpu_node, const std::string &file_path,
+    const std::map<std::string, tinyxml2::XMLElement*> &msccl_name2algo){
+
+    NS_LOG_INFO("Loading GPU workload trace from file: " << file_path << " for GPUNode ID: " << gpu_node->GetId());
+
+    // Open the trace file
+    std::ifstream trace_file(file_path);
+    NS_ASSERT_MSG(trace_file.is_open(), "Failed to open GPU workload trace file: " << file_path);
+
+    // read from second line
+    std::string line;
+    std::getline(trace_file, line); // skip header line
+    bool is_first_step = true;
+    while (std::getline(trace_file, line)){
+        MPIStep step = ParseWorkLoadTraceLine(line);
+        // std::cout << "Parsed MPIStep - Name: " << step.name 
+        //           << ", Total Size (bytes): " << step.total_size_bytes 
+        //           << ", Ranks: ";
+        // for (int r : step.ranks) std::cout << r << " ";
+        // std::cout << std::endl;
+        step.algo = msccl_name2algo.at(step.name); // TODO: a smart way to choose algo for a collective
+        NS_ASSERT_MSG(step.algo != nullptr, "Algorithm XML element not found for name: " << step.name);
+        // if the first step, intervel = collective_start_time, otherwise = 0
+        gpu_node->AddMPIStep(step, 0.0);
+        // schedual GPUNode::StartMPIStep run at collective_start_time for the first step
+
+        if (is_first_step) {
+            // Use ScheduleWithContext to ensure the event runs with the correct node context
+            Simulator::ScheduleWithContext(gpu_node->GetId(), Seconds(collective_start_time), &GPUNode::StartMPIStep, gpu_node);
+        }
+        is_first_step = false;
+    }
+    return;
+}
+
+
+struct GlobalConnectionTable{
+    // this contains all connections in the system
+    // it depends on the connections two pairs and the channel's id
+    // (src, dst, channel) and (dst, src, channel) are treated as different connections
+    struct ConnectionKey {
+        uint32_t src_rank;
+        uint32_t dst_rank;
+        int channel;
+        
+        ConnectionKey(uint32_t src, uint32_t dst, int ch) 
+            : src_rank(src)
+            , dst_rank(dst)
+            , channel(ch) {}
+        
+        bool operator<(const ConnectionKey& other) const {
+            if (src_rank != other.src_rank) return src_rank < other.src_rank;
+            if (dst_rank != other.dst_rank) return dst_rank < other.dst_rank;
+            return channel < other.channel;
+        }
+    };
+    
+    std::vector<ConnectionInfo> connections;
+    std::set<ConnectionKey> connection_set;
+
+    bool HasConnection(const ConnectionInfo &conn) const {
+        ConnectionKey key(conn.src_rank, conn.dst_rank, conn.channel);
+        return connection_set.find(key) != connection_set.end();
+    }
+
+    void AddConnection(const ConnectionInfo &conn){
+        ConnectionKey key(conn.src_rank, conn.dst_rank, conn.channel);
+        if (connection_set.insert(key).second){
+            connections.push_back(conn);
+        }
+    }
+};
+
+struct GlobalConnection{
+    struct NodeConnection{
+        std::vector<ConnectionInfo> send_conns;
+        std::vector<ConnectionInfo> recv_conns;
+    };
+
+    std::map<uint32_t, NodeConnection> node_connections; // key is node rank
+};
+
+void
+PrintGlobalConnection(GlobalConnectionTable &global_connection_table){
+    NS_LOG_INFO("Global Connection Table:");
+    for (const auto &conn : global_connection_table.connections){
+        NS_LOG_INFO("  Src Rank: " << conn.src_rank 
+                    << ", Dst Rank: " << conn.dst_rank 
+                    << ", Channel: " << conn.channel);
+    }
+}
+
+// use global varibles: simulator_start_time
+void
+SetupGlobalConnection(GlobalConnectionTable &global_connection_table){
+    // node container only contains gpu nodes
+    NS_LOG_INFO("Setting up all connection table for GPU nodes.");
+
+    // TODO: PG set, dport set
+    uint16_t pg = 3;
+    uint16_t dport = 100;
+    uint16_t sport = 0;
+
+    auto &all_connections = global_connection_table.connections;
+
+    for (const auto &conn: all_connections) {
+        uint32_t src_rank = conn.src_rank;
+        uint32_t dst_rank = conn.dst_rank;
+        int channel = conn.channel;
+
+        Ptr<GPUNode> src_gpu = DynamicCast<GPUNode>(rank2node_peer[src_rank].first);
+        Ptr<GPUNode> dst_gpu = DynamicCast<GPUNode>(rank2node_peer[dst_rank].first);
+
+        int src = rank2node_peer[src_rank].second;
+        int dst = rank2node_peer[dst_rank].second;
+
+        Ipv4Address src_ip = src_gpu->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal();
+        Ipv4Address dst_ip = dst_gpu->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal();
+        NS_ASSERT_MSG(src_ip == serverAddress[src], "Source IP mismatch for rank " << src_rank);
+        NS_ASSERT_MSG(dst_ip == serverAddress[dst], "Destination IP mismatch for rank " << dst_rank);
+
+        Ptr<RdmaClient> send_rdma, recv_rdma;
+        RdmaClientHelper send_helper, recv_helper;
+
+        // Send RdmaClient:
+        sport = portNumber[src][dst]++;
+        send_helper = RdmaClientHelper(
+            pg, src_ip, dst_ip, sport, dport,
+            0, // create a qp w/o message
+            has_win ? (global_t == 1 ? maxBdp : pairBdp[src_gpu][dst_gpu] ) : 0,
+            global_t == 1 ? maxRtt : pairRtt[src][dst],
+            nullptr, nullptr,
+            1, src, dst,
+            false, false // passive destroy, not operations run
+        );
+        ApplicationContainer send_app = send_helper.Install(n.Get(src));
+        send_app.Start(Seconds(simulator_start_time));
+        send_rdma = DynamicCast<RdmaClient>(send_app.Get(0));
+        src_gpu->AddConnection(conn, send_rdma);
+
+        // recv RdmaClient:
+        // just a dumb rdmaclient for callback
+        recv_helper = RdmaClientHelper(
+            pg, dst_ip, dst_ip, 100, 100,
+            0, 0, 0, nullptr, nullptr, 1, dst, dst, false, false
+        );
+        ApplicationContainer recv_app = recv_helper.Install(n.Get(dst));
+        recv_app.Start(Seconds(simulator_start_time));
+        recv_rdma = DynamicCast<RdmaClient>(recv_app.Get(0));
+        dst_gpu->AddConnection(conn, recv_rdma);
+
+        // setup driver layer callback (add channel)
+        send_rdma->AddTxChannel(
+            ((uint64_t)serverAddress[dst].Get() << 32) |
+            ((uint64_t)sport << 16) |
+            ((uint64_t)pg)
+        );
+        recv_rdma->AddRxChannel(
+            std::make_pair(
+                ((uint64_t)serverAddress[dst].Get() << 32) |
+                ((uint64_t)sport << 16) |
+                ((uint64_t)pg),
+                src_ip.Get()
+            )
+        );
+    }
 }
 
 void cancel_monitor()
@@ -1249,178 +1544,124 @@ void SetupNetwork(
     // Algorithm configuration
     /////////////////////////////////////////////////////
 
-    // avoid <optimized out> in -O3
-    auto xml_load_result = algo_xml_doc.LoadFile(algo_file.c_str());
-    NS_ASSERT_MSG(
-        xml_load_result == tinyxml2::XML_SUCCESS,
-        "Failed to open algo xml file: " << algo_file);
+    std::string algo_dir = "./examples/allstack/algorithms/";
+    std::string gpu_workload_trace_dir = "./examples/allstack/gpu_workloads/";
 
-    tinyxml2::XMLElement *algo = algo_xml_doc.FirstChildElement("algo");
-    NS_ASSERT_MSG(algo != nullptr, "No <algo> element found in algo xml file");
-    
-    // First pass: build a map of GPU rank -> XMLElement
-    std::unordered_map<uint32_t, tinyxml2::XMLElement*> rank_to_gpu_xml;
-    auto gpu = algo->FirstChildElement("gpu");
-    while (gpu != nullptr)
-    {
-        uint32_t gpu_rank = gpu->IntAttribute("id");
-        rank_to_gpu_xml[gpu_rank] = gpu;
-        gpu = gpu->NextSiblingElement("gpu");
-    }
-    
-    // Second pass: assign ranks to GPU nodes and install applications only for matching ranks
+
+    // 0. give each GPUNode a rank id
+    // TODO: A better way to assign rank id
+    // std::string gpu_rank_map_file = "./examples/allstack/rank_map.txt";
+
     NodeContainer gpu_nodes{0};
     uint32_t current_gpu_rank = 0;
     for (uint32_t i = 0; i < node_num; i++)
     {
-        if (n.Get(i)->GetNodeType() == 0)
-        {
-            gpu_nodes = NodeContainer(gpu_nodes, n.Get(i));
-
-            auto gpu_node = DynamicCast<GPUNode>(n.Get(i));
-            gpu_node->SetRank(current_gpu_rank);
-            rank2node_peer[current_gpu_rank] = make_pair(n.Get(i), i);
-            
-            // Only install GPUThreadBlock if this rank has configuration in XML
-            if (rank_to_gpu_xml.find(current_gpu_rank) != rank_to_gpu_xml.end())
-            {
-                tinyxml2::XMLElement* gpu_xml = rank_to_gpu_xml[current_gpu_rank];
-                NS_LOG_INFO("Installing GPUThreadBlock for GPU rank " << current_gpu_rank << " on node " << i);
-
-                GPUThreadBlockHelper helper(gpu_xml);
-            ApplicationContainer apps = helper.Install(DynamicCast<GPUNode>(n.Get(i)));
-                apps.Start(Seconds(collective_start_time));
-            }
-            else
-            {
-                NS_LOG_INFO("Skipping GPUThreadBlock installation for GPU rank " << current_gpu_rank 
-                           << " on node " << i << " (no matching configuration in XML)");
-            }
-            
-            current_gpu_rank++;
-        }
+        if (n.Get(i)->GetNodeType() != 0) continue;
+        Ptr<GPUNode> gpu_node = DynamicCast<GPUNode>(n.Get(i));
+        gpu_nodes = NodeContainer(gpu_nodes, n.Get(i));
+        gpu_node->SetRank(i);
+        rank2node[current_gpu_rank] = gpu_node;
+        rank2node_peer[current_gpu_rank] = make_pair(n.Get(i), i);
+        current_gpu_rank++;
     }
 
-    NS_LOG_INFO("Algorithm has been configured.");
+    // 1, load all algorithms.
+    // Maintain a map from algorithm name to its XML element.
+    // TODO: A better way to access algo, but not by name
+    std::map<std::string, tinyxml2::XMLElement*> msccl_name2algo;
+    msccl_name2algo = LoadAllMscclAlgorithms(algo_dir);
 
-    uint16_t priority_group = 3;
+    // 2, read all GPU workload traces
+    // each file name: simulator_log_rank_4.txt
 
-    for (uint32_t i = 0; i < gpu_nodes.GetN(); i++)
+    // for each gpunode 
+    for (uint32_t i = 0; i < n.GetN(); i++)
     {
-        Ptr<GPUNode> this_gpu = DynamicCast<GPUNode>(gpu_nodes.Get(i));
+        if (n.Get(i)->GetNodeType() != 0) continue;
+        Ptr<GPUNode> gpu_node = DynamicCast<GPUNode>(n.Get(i));
 
-        // list all threadblock in this gpu
-        //  TODO: CHANNEL ///////////!!!!!!!!!!!!!!!!
-        for (uint32_t j = 0; j < this_gpu->GetNThreadBlocks(); j++)
+        int this_rank = gpu_node->GetRank();
+        std::string workload_trace_file = "simulator_log_rank_" + std::to_string(this_rank) + ".txt";
+        workload_trace_file = gpu_workload_trace_dir.back() == '/'
+                                   ? gpu_workload_trace_dir + workload_trace_file
+                                   : gpu_workload_trace_dir + "/" + workload_trace_file;
+
+        LoadGpuWorkloadTrace(gpu_node, workload_trace_file, msccl_name2algo);
+    }
+
+
+    // 3, get all connections
+
+    // clear global_connection_table and global_connection
+    GlobalConnectionTable global_connection_table;
+    GlobalConnection global_connection; // TODO: Maybe useless
+    global_connection.node_connections.clear();
+    global_connection_table.connections.clear();
+    global_connection_table.connection_set.clear();
+    
+
+    // 3.1. get a table:
+    for (uint32_t i = 0; i < n.GetN(); i++)
+    {
+        if (n.Get(i)->GetNodeType() != 0) continue;
+        Ptr<GPUNode> gpu_node = DynamicCast<GPUNode>(n.Get(i));
+
+        auto gpu_xmls = gpu_node->GetMPISteps();
+        for (const auto& mpi_step : *gpu_xmls)
         {
-
-            Ptr<ThreadBlock> tb = this_gpu->GetThreadBlock(j);
-            int send_peer = tb->GetSend();
-            int recv_peer = tb->GetRecv();
-            int channel = tb->GetChannel();
-
-            Ptr<RdmaClient> my_client = nullptr;
-            RdmaClientHelper my_clientHelper;
-
-            uint32_t node_src_i = rank2node_peer[this_gpu->GetRank()].second;
-            uint16_t recv_peer_sport, node_sport;
-            uint32_t send_peer_i, recv_peer_i;
-
-            // not a send node
-            if (send_peer == -1)
+            tinyxml2::XMLElement* gpu_xml = mpi_step.algo;
+            for (auto tb_xml = gpu_xml->FirstChildElement("tb"); tb_xml != nullptr; tb_xml = tb_xml->NextSiblingElement("tb"))
             {
-                NS_LOG_INFO("Not a send node, create a loopback connection");
-                my_clientHelper = RdmaClientHelper(
-                    priority_group, serverAddress[node_src_i], serverAddress[node_src_i], 100, 100,
-                    0, 0, 0, nullptr, nullptr, 1, node_src_i, node_src_i, false, false);
 
-                ApplicationContainer appThisChannel = my_clientHelper.Install(n.Get(node_src_i));
-                my_client = DynamicCast<RdmaClient>(appThisChannel.Get(0));
-                appThisChannel.Start(Seconds(simulator_start_time));
-                // my_client->Setup();
+                uint32_t this_rank = gpu_node->GetRank();
+                int32_t origin_send = static_cast<int32_t>(std::stoi(tb_xml->Attribute("send")));
+                int32_t origin_recv = static_cast<int32_t>(std::stoi(tb_xml->Attribute("recv")));
 
-                node_sport = 1;
-                connection_map[getHashKey(node_src_i, node_src_i, priority_group, channel)] = my_client;
-            }
-            else // is a send node
-            {
-                send_peer_i = rank2node_peer[send_peer].second;
+                NS_LOG_DEBUG("+++++++++++++++++++++++++++++++");
+                NS_LOG_DEBUG("Original id: " << this_rank << ", send: " << origin_send << ", recv: " << origin_recv);
 
-                std::string key = getHashKey(node_src_i, send_peer_i, priority_group, channel);
+                int32_t mapped_send = (origin_send == -1) ? -1 : mpi_step.ranks[origin_send];
+                int32_t mapped_recv = (origin_recv == -1) ? -1 : mpi_step.ranks[origin_recv];
 
-                if (connection_map.find(key) != connection_map.end())
-                {
-                    NS_LOG_INFO("Connection already exists, reuse it");
-                    my_client = connection_map[key];
-                    node_sport = my_client->GetLocal().second;
+                NS_LOG_DEBUG("Mapped id: " << this_rank << ", send: " << mapped_send << ", recv: " << mapped_recv);
+
+                int32_t channel = static_cast<int32_t>(std::stoi(tb_xml->Attribute("chan")));
+
+                ConnectionInfo send_conn_info, recv_conn_info;
+                send_conn_info.src_rank = this_rank;
+                send_conn_info.dst_rank = static_cast<uint32_t>(mapped_send);
+                send_conn_info.channel = channel;
+                recv_conn_info.src_rank = static_cast<uint32_t>(mapped_recv);
+                recv_conn_info.dst_rank = this_rank;
+                recv_conn_info.channel = channel;
+
+                if (origin_send != -1){
+                    global_connection.node_connections[this_rank].send_conns.push_back(send_conn_info);
+                    NS_LOG_DEBUG("Add send connection: " << this_rank << " -> " << mapped_send << " channel: " << channel);
+                    global_connection_table.AddConnection(send_conn_info);
                 }
-                else
-                {
-                    node_sport = portNumber[node_src_i][send_peer_i]++;
-                    uint32_t dport = 100;
-                    my_clientHelper = RdmaClientHelper(
-                        priority_group, serverAddress[node_src_i], serverAddress[send_peer_i], node_sport, dport,
-                        0, // create a qp w/o message
-                        has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(node_src_i)][n.Get(send_peer_i)]) : 0,
-                        global_t == 1 ? maxRtt : pairRtt[node_src_i][send_peer_i],
-                        nullptr, nullptr,
-                        1, node_src_i, send_peer_i,
-                        false, false); // passive destroy, not operations run
-
-                    ApplicationContainer app = my_clientHelper.Install(n.Get(node_src_i));
-                    my_client = DynamicCast<RdmaClient>(app.Get(0));
-                    // my_client->Setup();
-                    app.Start(Seconds(simulator_start_time));
-
-                    connection_map[key] = my_client;
+                if (origin_recv != -1){
+                    global_connection.node_connections[this_rank].recv_conns.push_back(recv_conn_info);
+                    NS_LOG_DEBUG("Add recv connection: " << mapped_recv << " -> " << this_rank << " channel: " << channel);
+                    global_connection_table.AddConnection(recv_conn_info);
                 }
             }
-            if (recv_peer >= 0)
-            {
-                uint16_t port;
-                recv_peer_i = rank2node_peer[recv_peer].second;
+        }
 
-                std::string key = getHashKey(recv_peer_i, node_src_i, priority_group, channel);
-
-                if (connection_map.find(key) != connection_map.end())
-                {
-                    recv_peer_sport = connection_map[key]->GetLocal().second;
-                }
-                else
-                {
-                    uint32_t sport = portNumber[recv_peer_i][node_src_i]++;
-                    uint32_t dport = 100;
-                    RdmaClientHelper clientHelper(
-                        priority_group, serverAddress[recv_peer_i], serverAddress[node_src_i], sport, dport,
-                        0, // create a qp w/o message
-                        has_win ? (global_t == 1 ? maxBdp : pairBdp[n.Get(recv_peer_i)][n.Get(node_src_i)]) : 0,
-                        global_t == 1 ? maxRtt : pairRtt[recv_peer_i][node_src_i],
-                        nullptr, nullptr,
-                        1, recv_peer_i, node_src_i,
-                        false, false); // passive destroy, not operations run
-
-                    ApplicationContainer app = clientHelper.Install(n.Get(recv_peer_i));
-                    Ptr<RdmaClient> client = DynamicCast<RdmaClient>(app.Get(0));
-
-                    recv_peer_sport = sport;
-
-                    connection_map[key] = client;
-                    // client->Setup();
-                    app.Start(Seconds(simulator_start_time));
-                }
-            }
-
-            if (send_peer >= 0)
-                my_client->AddTxChannel(((uint64_t)serverAddress[send_peer_i].Get() << 32) | ((uint64_t)node_sport << 16) | (uint64_t)priority_group);
-
-            if (recv_peer >= 0)
-                my_client->AddRxChannel(std::make_pair(
-                    (((uint64_t)serverAddress[node_src_i].Get() << 32) | ((uint64_t)recv_peer_sport << 16) | (uint64_t)priority_group),
-                    serverAddress[recv_peer_i].Get()));
-
-            tb->BindRdmaClient(my_client);
+        // check if the GPUNode has no connections
+        // check its send_conns and recv_conns
+        auto& node_conns = global_connection.node_connections[gpu_node->GetRank()];
+        if (node_conns.send_conns.empty() && node_conns.recv_conns.empty())
+        {
+            NS_LOG_WARN("GPUNode " << gpu_node->GetId() << " (rank " << gpu_node->GetRank() << ") has no connections in its workload trace.");
         }
     }
+
+    // 3.2. print the global connection table
+    PrintGlobalConnection(global_connection_table);
+
+    // 3.3. Setup Global Connection according to the global connection table
+    SetupGlobalConnection(global_connection_table);
 
     /////////////////////////////////////////////////////
     // Trace configuration
