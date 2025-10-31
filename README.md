@@ -77,19 +77,23 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
     - **A**：通过引入一个标志位（`msg.m_setupd`）来确保序列号在每个消息的生命周期中只被设置一次，问题已解决。
 
 
-- [ ] `RdmaClient` 在 `ThreadBlock` 之前初始化
+- [x] `RdmaClient` 在 `ThreadBlock` 之前初始化
     - **Q**：在 `ThreadBlock` 初始化之前，`RdmaClient` 已经被创建和设置好
     - **Q**：以确保 `ThreadBlock` 能够在其生命周期内访问和使用 `RdmaClient` 实例, 进一步的，当存在多个 CC 要执行时, `RdmaClient` 实例可以被复用
-- [ ] Demystify Why a dumb RDMAClient is needed for simulation
+- [x] Demystify Why a dumb RDMAClient is needed for simulation
 - [ ] Message ID management for recv, to match the recv buffer (srcbuf, srcoff, cnt, dstbuf, dstoff)
     - `ThreadBlock::DoRecv`
-- [ ] Send completion callback to THREADBLOCK, donot use polling
+- [x] Send completion callback to THREADBLOCK, donot use polling
     - `ThreadBlock::CompleteThreadBlock`
+    - Use TracedValue
 - [ ] Send Time calculation
     - `ThreadBlock::DoSend`
 
 
-- [ ] RDMA over Ethernet for Distributed Training at Meta Scale, background
+- About GPU Log Run:
+    - [ ] Use 8xA100 failed at #7 - #8
+    - [ ] release mode startup error (runtime)
+    - [ ] mtp start up error
 
 ## Performance Issues
 
@@ -97,7 +101,7 @@ sudo perf script | ~/FlameGraph/stackcollapse-perf.pl | ~/FlameGraph/flamegraph.
     - **Q**：当`flow_input` 文件中多个流之间存在显著的开始时间差异时，整体模拟时间会增加
     - **Perf**：`ns3::QbbNetDevice::DequeueAndTransmit` 占用大量 CPU 时间
     - ![image](.assets/QpReuse-DequeueAndTransmit.png)
-    - **A**: TxDequeueMode::DWRR
+    - **A**: TxDequeueMode::DWRR !!!!!
 
 - [ ] Message Size 较大时模拟时间过长 (`msccl/main.cc`)
     - **Q**：在处理大规模数据传输时，模拟时间不成比例地增加，表明存在扩展性瓶颈。
