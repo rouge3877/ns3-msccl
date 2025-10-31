@@ -98,12 +98,10 @@ GPUNode::UpdateTBStatus(uint32_t index, uint32_t step)
     NS_LOG_FUNCTION(this);
     m_tb_status[index] = step;
 
-    std::cout << Simulator::Now().GetSeconds()
-              << "\tGPU " << GetId()
-              << "\tThreadBlock " << index
-              << "\tStep " << step
-              << "\tNotified!"
-              << std::endl;
+    NS_LOG_INFO("GPU " << GetId()
+                 << " ThreadBlock " << index
+                 << " Step " << step
+                 << " Notified!");
 
     for (auto i = m_threadblocks.begin(); i != m_threadblocks.end(); i++)
     {

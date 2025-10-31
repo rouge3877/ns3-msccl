@@ -137,11 +137,7 @@ ThreadBlock::UpdateTBStatus(uint32_t id, uint32_t s)
     if (m_waitDep && m_depid == id && m_deps <= s)
     {
         m_waitDep = false;
-        std::cout << Simulator::Now().GetSeconds()
-                  << "\tGPU " << m_node->GetId()
-                  << "\tThreadBlock " << m_id
-                  << "\tResumed"
-                  << std::endl;
+        NS_LOG_INFO("GPU " << m_node->GetId() << " ThreadBlock " << m_id << " Resumed.");
         DoStep();
     }
 }
@@ -201,11 +197,7 @@ ThreadBlock::CheckDep()
             m_waitDep = true;
             m_depid = depid;
             m_deps = deps;
-            std::cout << Simulator::Now().GetSeconds()
-                      << "\tGPU " << m_node->GetId()
-                      << "\tThreadBlock " << m_id
-                      << "\tPaused"
-                      << std::endl;
+            NS_LOG_INFO("GPU " << m_node->GetId() << " ThreadBlock " << m_id << " Paused.");
         }
     }
     return !m_waitDep;
