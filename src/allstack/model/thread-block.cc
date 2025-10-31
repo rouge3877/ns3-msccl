@@ -219,6 +219,9 @@ ThreadBlock::DoStep()
         case ThreadBlockStep::REDUCE:
             DoReduce();
             break;
+        case ThreadBlockStep::COPY:
+            DoReduce(); // 使用 Reduce 时间模拟 Copy 操作
+            break;
         case ThreadBlockStep::SEND:
             DoSend(step->GetCount());
             break;

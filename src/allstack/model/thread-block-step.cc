@@ -34,6 +34,7 @@ ThreadBlockStep::GetTypeId()
                     ThreadBlockStep::REDUCE, "re", 
                     ThreadBlockStep::SEND, "s", 
                     ThreadBlockStep::RECV, "r",
+                    ThreadBlockStep::COPY, "cpy",
                     ThreadBlockStep::RECV_REDUCE_COPY, "rrc",
                     ThreadBlockStep::RECV_REDUCE_COPY_SEND, "rrcs",
                     ThreadBlockStep::RECV_REDUCE_SEND, "rrs",

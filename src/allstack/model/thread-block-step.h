@@ -24,6 +24,7 @@ class ThreadBlockStep : public Object
         {
             NOP,        //!< no to do
             REDUCE,     //!< compute
+            COPY,       //!< copy to peer
             SEND,       //!< send to peer
             RECV,       //!< receive from peer
             RECV_REDUCE_COPY,       //!< receive and reduce and copy to peer
