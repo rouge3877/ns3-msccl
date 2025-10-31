@@ -77,6 +77,9 @@ class GPUNode : public Node
 
         void AddConnection(ConnectionInfo conn, Ptr<RdmaClient> client);
 
+        void SetMPIFinishDir(const std::string &dir);
+        void WriteMPIFinishTrace(const MPIStep &step, ns3::Time finish_time);
+
         ns3::Time m_end_time = Seconds(0);   //!< time when this GPU node finished all TBs
 
     protected:
@@ -93,6 +96,10 @@ class GPUNode : public Node
 
         // connections about this GPU node
         std::map<ConnectionInfo, Ptr<RdmaClient>> m_connections;
+
+        // MPI finish trace
+        std::string m_mpi_finish_dir;
+        std::ofstream m_mpi_finish_trace_file;
 };
 
 }

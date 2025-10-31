@@ -6,6 +6,7 @@ ALGO_FILE ./examples/allstack/algos/allreduce_hierarchical_54_1.xml
 FCT_OUTPUT_FILE ./examples/allstack/outputs/fct.txt
 PFC_OUTPUT_FILE ./examples/allstack/outputs/pfc.txt
 SEND_OUTPUT_FILE ./examples/allstack/outputs/send.txt
+MPI_FINISH_DIR ./sim-results
 
 # MONITOR SETTINGS
 QLEN_MON_FILE ./examples/allstack/outputs/qlen.txt

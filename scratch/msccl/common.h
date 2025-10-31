@@ -73,6 +73,7 @@ std::string trace_output_file = "mix.tr";
 std::string fct_output_file = "fct.txt";
 std::string pfc_output_file = "pfc.txt";
 std::string send_output_file = ""; // default no send output
+std::string mpi_finish_dir = "sim-results"; // directory for MPI finish traces
 
 double error_rate_per_link = 0.0;
 uint32_t has_win = 1;
@@ -114,6 +115,7 @@ void InitConfigMap()
     config_map["FCT_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(fct_output_file);
     config_map["PFC_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(pfc_output_file);
     config_map["SEND_OUTPUT_FILE"] = std::make_unique<ConfigVar<std::string>>(send_output_file);
+    config_map["MPI_FINISH_DIR"] = std::make_unique<ConfigVar<std::string>>(mpi_finish_dir);
     config_map["ERROR_RATE_PER_LINK"] = std::make_unique<ConfigVar<double>>(error_rate_per_link);
     config_map["HAS_WIN"] = std::make_unique<ConfigVar<uint32_t>>(has_win);
     config_map["GLOBAL_T"] = std::make_unique<ConfigVar<uint32_t>>(global_t);
@@ -1587,6 +1589,9 @@ void SetupNetwork(
                                    : gpu_workload_trace_dir + "/" + workload_trace_file;
 
         LoadGpuWorkloadTrace(gpu_node, workload_trace_file, msccl_name2algo);
+        
+        // Setup MPI finish trace directory for this GPU node
+        gpu_node->SetMPIFinishDir(mpi_finish_dir);
     }
 
 

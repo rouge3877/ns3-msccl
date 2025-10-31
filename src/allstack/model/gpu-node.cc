@@ -130,6 +130,14 @@ GPUNode::DoDispose()
 {
     m_tb_status.clear();
     m_threadblocks.clear();
+    
+    // Close MPI finish trace file
+    if (m_mpi_finish_trace_file.is_open())
+    {
+        m_mpi_finish_trace_file.close();
+        NS_LOG_INFO("Closed MPI finish trace file for rank " << m_rank);
+    }
+    
     Node::DoDispose();
 }
 
@@ -285,6 +293,14 @@ GPUNode::CompleteMPIStep()
 {
     NS_LOG_FUNCTION(this);
 
+    // Write MPI finish trace before incrementing index
+    if (m_mpi_step_idx < m_mpi_steps.size())
+    {
+        MPIStep &completed_step = m_mpi_steps[m_mpi_step_idx];
+        ns3::Time current_time = Simulator::Now();
+        WriteMPIFinishTrace(completed_step, current_time);
+    }
+
     m_mpi_step_idx += 1;
     // clear all thread blocks
     ApplicationContainer tb_apps;
@@ -319,6 +335,71 @@ GPUNode::AddConnection(ConnectionInfo conn, Ptr<RdmaClient> client)
                                                           << ", channel=" << conn.channel);
     }
     m_connections[conn] = client;
+}
+
+void
+GPUNode::SetMPIFinishDir(const std::string &dir)
+{
+    NS_LOG_FUNCTION(this);
+    m_mpi_finish_dir = dir;
+    
+    // Create directory if it doesn't exist
+    std::string mkdir_cmd = "mkdir -p " + dir;
+    int result = system(mkdir_cmd.c_str());
+    if (result != 0)
+    {
+        NS_LOG_WARN("Failed to create directory: " << dir);
+    }
+    
+    // Open trace file for this rank
+    std::string filename = dir + "/trace_rank_" + std::to_string(m_rank) + ".txt";
+    m_mpi_finish_trace_file.open(filename, std::ios::out);
+    
+    if (!m_mpi_finish_trace_file.is_open())
+    {
+        NS_LOG_ERROR("Failed to open MPI finish trace file: " << filename);
+        return;
+    }
+    
+    // Write header
+    m_mpi_finish_trace_file << "rank\t"
+                           << "mpi_step_idx\t"
+                           << "mpi_name\t"
+                           << "total_size_bytes\t"
+                           << "num_ranks\t"
+                           << "finish_time_ns\t"
+                           << "finish_time_us"
+                           << std::endl;
+    m_mpi_finish_trace_file.flush();
+    
+    NS_LOG_INFO("Opened MPI finish trace file for rank " << m_rank << ": " << filename);
+}
+
+void
+GPUNode::WriteMPIFinishTrace(const MPIStep &step, ns3::Time finish_time)
+{
+    NS_LOG_FUNCTION(this);
+    
+    if (!m_mpi_finish_trace_file.is_open())
+    {
+        NS_LOG_WARN("MPI finish trace file is not open for rank " << m_rank);
+        return;
+    }
+    
+    // Write MPI step completion information
+    m_mpi_finish_trace_file << m_rank << "\t"
+                           << m_mpi_step_idx << "\t"
+                           << step.name << "\t"
+                           << step.total_size_bytes << "\t"
+                           << step.ranks.size() << "\t"
+                           << finish_time.GetNanoSeconds() << "\t"
+                           << finish_time.GetMicroSeconds()
+                           << std::endl;
+    m_mpi_finish_trace_file.flush();    
+    // NS_LOG_DEBUG("Wrote MPI finish trace for rank " << m_rank 
+    //             << ", step " << (m_mpi_step_idx - 1) 
+    //             << ", name: " << step.name
+    //             << ", time: " << finish_time.GetSeconds() << "s");
 }
 
 }
