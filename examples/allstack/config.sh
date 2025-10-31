@@ -1,5 +1,5 @@
 # INPUT FILE PATH
-TOPOLOGY_FILE ./examples/allstack/topos/fattree-k6
+TOPOLOGY_FILE ./examples/allstack/topos/star-n8
 ALGO_FILE ./examples/allstack/algos/allreduce_hierarchical_54_1.xml
 
 # OUTPUT FILE PATH
@@ -27,7 +27,7 @@ TRACE_OUTPUT_FILE ./examples/allstack/outputs/mix.tr
 # VAR SETTINGS
 SIMULATOR_START_TIME 0.00
 SIMULATOR_STOP_TIME 40000000000000.00
-COLLECTIVE_START_TIME 0.00
+COLLECTIVE_START_TIME 2.00
 ERROR_RATE_PER_LINK 0.0000
 
 HAS_WIN 0
