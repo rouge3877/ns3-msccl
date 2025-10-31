@@ -328,7 +328,7 @@ ThreadBlock::DoSend(uint32_t chunks)
 
     Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
     uint64_t size = chunks * m_chunkSize;
-    this->GetRdmaClient()->DoSend(size);
+    this->GetSendRdmaClient()->DoSend(size);
 }
 
 void
@@ -344,7 +344,7 @@ ThreadBlock::DoRecv()
     else
     {
         // 否则等待，通过 RdmaClient 接收消息
-        this->GetRdmaClient()->DoRecv();
+        this->GetRecvRdmaClient()->DoRecv();
     }
 }
 
@@ -361,7 +361,7 @@ ThreadBlock::DoRecvReduceCopy()
     else
     {
         // 否则等待，通过 RdmaClient 接收消息
-        this->GetRdmaClient()->DoRecv();
+        this->GetRecvRdmaClient()->DoRecv();
     }
 }
 
@@ -379,12 +379,12 @@ ThreadBlock::DoRecvReduceCopySend(uint32_t chunks)
 
         Simulator::Schedule(Seconds(REDUCE_TIME + COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
-        this->GetRdmaClient()->DoSend(size);
+        this->GetSendRdmaClient()->DoSend(size);
     }
     else
     {
         // 否则等待，通过 RdmaClient 接收消息
-        this->GetRdmaClient()->DoRecv();
+        this->GetRecvRdmaClient()->DoRecv();
     }
 }
 
@@ -400,12 +400,12 @@ ThreadBlock::DoRecvReduceSend(uint32_t chunks)
 
         Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
-        this->GetRdmaClient()->DoSend(size);
+        this->GetSendRdmaClient()->DoSend(size);
     }
     else
     {
         // 否则等待，通过 RdmaClient 接收消息
-        this->GetRdmaClient()->DoRecv();
+        this->GetRecvRdmaClient()->DoRecv();
     }
 }
 
@@ -420,46 +420,52 @@ ThreadBlock::DoRecvCopySend(uint32_t chunks)
         m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
         Simulator::Schedule(Seconds(COPY_TIME + SEND_TIME), &ThreadBlock::CompleteStep, this);
         uint64_t size = chunks * m_chunkSize;
-        this->GetRdmaClient()->DoSend(size);
+        this->GetSendRdmaClient()->DoSend(size);
     }
     else
     {
         // 否则等待，通过 RdmaClient 接收消息
-        this->GetRdmaClient()->DoRecv();
+        this->GetRecvRdmaClient()->DoRecv();
     }
 }
 
-
-// get the rdma client bound to this thread block
 Ptr<RdmaClient>
-ThreadBlock::GetRdmaClient()
+ThreadBlock::GetSendRdmaClient() const
 {
     NS_LOG_FUNCTION(this);
-    return m_rdma_client;
+    return m_send_rdma_client;
+}
+
+Ptr<RdmaClient>
+ThreadBlock::GetRecvRdmaClient() const
+{
+    NS_LOG_FUNCTION(this);
+    return m_recv_rdma_client;
 }
 
 void
-ThreadBlock::BindRdmaClient(Ptr<RdmaClient> client)
+ThreadBlock::BindRdmaClients(Ptr<RdmaClient> send_client, Ptr<RdmaClient> recv_client)
 {
     NS_LOG_FUNCTION(this);
-    // client->SetAboveLayerCallback(
-    //     MakeCallback(&ThreadBlock::CompleteStep, this),
-    //     MakeCallback(&ThreadBlock::CompleteStep, this)
-    // );
-    // client->SetAboveLayerCallback(
-    //     MakeNullCallback<void>(),
-    //     MakeCallback(&ThreadBlock::CompleteStep, this)
-    // );
-    client->SetAboveLayerCallback(
-        MakeCallback(&ThreadBlock::SendMessageDone, this),
-        MakeCallback(&ThreadBlock::RecvMessageDone, this)
-    );
-    // client->SetAboveLayerCallback(
-    //     MakeNullCallback<void>(),
-    //     MakeCallback(&ThreadBlock::RecvMessageDone, this)
-    // );
-    m_rdma_client = client;
-    m_rdma_clients.push_back(client);
+    // bind send rdma client
+    if (send_client)
+    {
+        send_client->SetAboveLayerCallback(
+            MakeCallback(&ThreadBlock::SendMessageDone, this),
+            MakeNullCallback<void>()
+        );
+    }
+    m_send_rdma_client = send_client;
+
+    // bind recv rdma client
+    if (recv_client)
+    {
+        recv_client->SetAboveLayerCallback(
+            MakeNullCallback<void>(),
+            MakeCallback(&ThreadBlock::RecvMessageDone, this)
+        );
+    }
+    m_recv_rdma_client = recv_client;
 }
 
 void
@@ -490,7 +496,7 @@ ThreadBlock::RecvMessageDone()
                     Simulator::Schedule(Seconds(REDUCE_TIME + SEND_TIME + COPY_TIME), &ThreadBlock::CompleteStep, this);
                     m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
-                    this->GetRdmaClient()->DoSend(size);
+                    this->GetSendRdmaClient()->DoSend(size);
                     break;
                 }
                 case ThreadBlockStep::RECV_REDUCE_SEND:
@@ -499,7 +505,7 @@ ThreadBlock::RecvMessageDone()
                     Simulator::Schedule(Seconds(REDUCE_TIME), &ThreadBlock::CompleteStep, this);
                     m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
-                    this->GetRdmaClient()->DoSend(size);
+                    this->GetSendRdmaClient()->DoSend(size);
                     break;
                 }
                 case ThreadBlockStep::RECV_COPY_SEND:
@@ -508,7 +514,7 @@ ThreadBlock::RecvMessageDone()
                     Simulator::Schedule(Seconds(SEND_TIME), &ThreadBlock::CompleteStep, this);
                     m_total_send_message_num_trace.Set(m_total_send_message_num_trace + 1);
                     uint64_t size = step->GetCount() * m_chunkSize;
-                    this->GetRdmaClient()->DoSend(size);
+                    this->GetSendRdmaClient()->DoSend(size);
                     break;
                 }
                 default:

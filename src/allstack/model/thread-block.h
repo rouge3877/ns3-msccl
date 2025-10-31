@@ -41,9 +41,10 @@ class ThreadBlock : public Application
 
         void UpdateTBStatus(uint32_t index, uint32_t step); 
 
-        void BindRdmaClient(Ptr<RdmaClient> client);
+        Ptr<RdmaClient> GetRecvRdmaClient() const;
+        Ptr<RdmaClient> GetSendRdmaClient() const;
+        void BindRdmaClients(Ptr<RdmaClient> send_client, Ptr<RdmaClient> recv_client);
         void SendMessageNumChanged(int oldValue, int newValue);
-        Ptr<RdmaClient> GetRdmaClient();
 
         void RecvMessageDone();
         void SendMessageDone();
@@ -86,6 +87,8 @@ class ThreadBlock : public Application
 
         std::vector<Ptr<RdmaClient>> m_rdma_clients;
         Ptr<RdmaClient> m_rdma_client;
+        Ptr<RdmaClient> m_send_rdma_client;
+        Ptr<RdmaClient> m_recv_rdma_client;
 
         int m_recv_message_num;   //!< number of recv messages, stay in buffer
         ns3::TracedValue<int> m_total_send_message_num_trace; //!< trace of number of messages to send
